@@ -589,6 +589,46 @@ input:focus-visible {
   padding: 10px 12px 12px;
 }
 
+.transform-grid {
+  display: grid;
+  gap: 0;
+  padding: 10px 12px 12px;
+}
+
+.transform-grid__header,
+.transform-grid__row {
+  display: grid;
+  grid-template-columns: 72px repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: center;
+}
+
+.transform-grid__header {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.transform-grid__row {
+  min-height: 30px;
+}
+
+.transform-grid__row:not(:last-child) {
+  margin-bottom: 8px;
+}
+
+.transform-grid__row > span:first-child {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.transform-grid__row > span:not(:first-child) {
+  text-align: center;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+
 .meta-list {
   display: grid;
   gap: 9px;

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { ViewHelper } from 'three/examples/jsm/helpers/ViewHelper.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
@@ -62,6 +63,23 @@ interface SelectedNodeDetails {
     x: string
     y: string
     z: string
+  }
+  transform: {
+    position: {
+      x: string
+      y: string
+      z: string
+    }
+    rotation: {
+      x: string
+      y: string
+      z: string
+    }
+    scale: {
+      x: string
+      y: string
+      z: string
+    }
   }
 }
 
@@ -227,17 +245,24 @@ const selectedNodeDetails = computed<SelectedNodeDetails | null>(() => {
     meshCount: summary.meshCount,
     triangleCount: formatInteger(summary.triangleCount),
     dimensions: summary.dimensions,
+    transform: {
+      position: formatTransformVector(object.position),
+      rotation: formatTransformVector(object.rotation),
+      scale: formatTransformVector(object.scale),
+    },
   }
 })
 
 let renderer: THREE.WebGLRenderer | null = null
 let composer: EffectComposer | null = null
 let outlinePass: OutlinePass | null = null
+let viewHelper: ViewHelper | null = null
 let scene: THREE.Scene | null = null
 let camera: THREE.PerspectiveCamera | null = null
 let controls: OrbitControls | null = null
 let resizeObserver: ResizeObserver | null = null
 let modelRoot: THREE.Object3D | null = null
+let axesHelper: THREE.Group | null = null
 let gridHelper: THREE.GridHelper | null = null
 let mixer: THREE.AnimationMixer | null = null
 let environmentMap: THREE.WebGLRenderTarget | null = null
@@ -259,8 +284,10 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(frameId)
   resizeObserver?.disconnect()
   disposeCurrentModel()
+  disposeAxes()
   disposeGrid()
   environmentMap?.dispose()
+  viewHelper?.dispose()
   controls?.dispose()
   composer?.dispose()
   renderer?.dispose()
@@ -300,6 +327,11 @@ function initScene() {
   outlinePass.pulsePeriod = 0
   composer.addPass(outlinePass)
   composer.addPass(new OutputPass())
+  viewHelper = new ViewHelper(camera, viewport)
+  viewHelper.location.right = 40
+  viewHelper.location.bottom = 40
+  viewHelper.setLabelStyle('24px Arial', '#000000', 18)
+  viewHelper.setLabels('X', 'Y', 'Z')
 
   controls = new OrbitControls(camera, canvas)
   controls.enableDamping = true
@@ -321,6 +353,7 @@ function initScene() {
   scene.add(hemisphereLight, keyLight, fillLight)
 
   applySceneBackground()
+  configureAxes(1.5, 0)
   configureGrid(8, 0)
   resizeRenderer()
 
@@ -344,8 +377,20 @@ function animate() {
     mixer.update(delta)
   }
 
+  if (viewHelper && controls) {
+    viewHelper.center.copy(controls.target)
+    if (viewHelper.animating) {
+      viewHelper.update(delta)
+    }
+  }
+
   controls?.update()
   composer?.render()
+  if (viewHelper) {
+    renderer.autoClear = false
+    viewHelper.render(renderer)
+    renderer.autoClear = true
+  }
 }
 
 function resizeRenderer() {
@@ -420,6 +465,10 @@ function handleCanvasPointerUp(event: PointerEvent) {
   pointerDown = null
 
   if (moveDistance > 5) {
+    return
+  }
+
+  if (viewHelper?.handleClick(event)) {
     return
   }
 
@@ -508,6 +557,7 @@ function installModel(gltf: GLTF, primaryFile: File, files: File[], objectUrls: 
   const fittedBox = new THREE.Box3().setFromObject(root)
   const fittedSize = fittedBox.getSize(new THREE.Vector3())
   const maxDimension = Math.max(fittedSize.x, fittedSize.y, fittedSize.z, 1)
+  configureAxes(Math.max(maxDimension * 0.24, 1), fittedBox.min.y)
   configureGrid(maxDimension * 1.5, fittedBox.min.y)
   fitCameraToBox(fittedBox)
 
@@ -841,6 +891,114 @@ function configureGrid(size: number, y: number) {
   scene.add(gridHelper)
 }
 
+function configureAxes(size: number, groundY: number) {
+  if (!scene) {
+    return
+  }
+
+  disposeAxes()
+
+  const origin = new THREE.Vector3(0, groundY + 0.01, 0)
+  const headLength = Math.max(size * 0.14, 0.28)
+  const headWidth = Math.max(size * 0.08, 0.16)
+  const lineLength = size * 3.6
+  axesHelper = new THREE.Group()
+  axesHelper.name = 'World axes helper'
+  axesHelper.renderOrder = 1000
+
+  const createAxisLine = (direction: THREE.Vector3, color: number) => {
+    const points = [
+      origin.clone().addScaledVector(direction, size),
+      origin.clone().addScaledVector(direction, lineLength),
+    ]
+    const geometry = new THREE.BufferGeometry().setFromPoints(points)
+    const material = new THREE.LineBasicMaterial({
+      color,
+      depthTest: false,
+      depthWrite: false,
+      opacity: 0.72,
+      toneMapped: false,
+      transparent: true,
+    })
+    const line = new THREE.Line(geometry, material)
+    line.renderOrder = 999
+    return line
+  }
+
+  const helpers = [
+    new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0),
+      origin,
+      size,
+      0xff4d4f,
+      headLength,
+      headWidth,
+    ),
+    new THREE.ArrowHelper(
+      new THREE.Vector3(0, 1, 0),
+      origin,
+      size,
+      0x7ed957,
+      headLength,
+      headWidth,
+    ),
+    new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, 1),
+      origin,
+      size,
+      0x4488ff,
+      headLength,
+      headWidth,
+    ),
+  ]
+
+  axesHelper.add(createAxisLine(new THREE.Vector3(1, 0, 0), 0xff4d4f))
+  axesHelper.add(createAxisLine(new THREE.Vector3(0, 1, 0), 0x7ed957))
+  axesHelper.add(createAxisLine(new THREE.Vector3(0, 0, 1), 0x4488ff))
+
+  for (const helper of helpers) {
+    helper.line.renderOrder = 1000
+    helper.cone.renderOrder = 1000
+
+    const arrowMaterials: THREE.Material[] = [
+      ...toMaterialArray(helper.line.material),
+      ...toMaterialArray(helper.cone.material),
+    ]
+
+    for (const material of arrowMaterials) {
+      material.depthTest = false
+      material.depthWrite = false
+      material.transparent = true
+      material.opacity = 0.98
+      ;(material as THREE.Material & { toneMapped?: boolean }).toneMapped = false
+    }
+
+    axesHelper.add(helper)
+  }
+
+  scene.add(axesHelper)
+}
+
+function disposeAxes() {
+  if (!scene || !axesHelper) {
+    axesHelper = null
+    return
+  }
+
+  scene.remove(axesHelper)
+  axesHelper.traverse((object) => {
+    if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+      object.geometry.dispose()
+
+      for (const material of toMaterialArray(object.material)) {
+        material.dispose()
+      }
+    }
+  })
+
+  axesHelper = null
+}
+
 function disposeGrid() {
   if (!scene || !gridHelper) {
     gridHelper = null
@@ -1159,6 +1317,14 @@ function formatDimension(value: number) {
   return Number.isFinite(value) ? formatDecimal(value) : '0'
 }
 
+function formatTransformVector(vector: THREE.Vector3 | THREE.Euler) {
+  return {
+    x: formatDecimal(vector.x),
+    y: formatDecimal(vector.y),
+    z: formatDecimal(vector.z),
+  }
+}
+
 function formatDecimal(value: number) {
   return new Intl.NumberFormat('zh-TW', {
     maximumFractionDigits: value >= 10 ? 1 : 3,
@@ -1413,6 +1579,38 @@ function average(values: number[]) {
               </dd>
             </div>
           </dl>
+        </section>
+
+        <section v-if="selectedNodeDetails" class="panel">
+          <div class="panel-heading">
+            <span>變換</span>
+          </div>
+          <div class="transform-grid" role="table" aria-label="節點變換">
+            <div class="transform-grid__header" role="row">
+              <span role="columnheader"></span>
+              <span role="columnheader">X</span>
+              <span role="columnheader">Y</span>
+              <span role="columnheader">Z</span>
+            </div>
+            <div class="transform-grid__row" role="row">
+              <span role="rowheader">位置</span>
+              <span>{{ selectedNodeDetails.transform.position.x }}</span>
+              <span>{{ selectedNodeDetails.transform.position.y }}</span>
+              <span>{{ selectedNodeDetails.transform.position.z }}</span>
+            </div>
+            <div class="transform-grid__row" role="row">
+              <span role="rowheader">旋轉</span>
+              <span>{{ selectedNodeDetails.transform.rotation.x }}</span>
+              <span>{{ selectedNodeDetails.transform.rotation.y }}</span>
+              <span>{{ selectedNodeDetails.transform.rotation.z }}</span>
+            </div>
+            <div class="transform-grid__row" role="row">
+              <span role="rowheader">縮放</span>
+              <span>{{ selectedNodeDetails.transform.scale.x }}</span>
+              <span>{{ selectedNodeDetails.transform.scale.y }}</span>
+              <span>{{ selectedNodeDetails.transform.scale.z }}</span>
+            </div>
+          </div>
         </section>
 
         <section v-if="stats" class="panel">
