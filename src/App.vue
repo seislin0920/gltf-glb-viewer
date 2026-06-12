@@ -13,6 +13,7 @@ const inspectorCollapsed = ref(false)
 const {
   fileInputRef,
   loading,
+  exporting,
   loadProgress,
   errorMessage,
   isDragging,
@@ -46,6 +47,7 @@ const {
   toggleMoveMode,
   setModelPosition,
   resetModelPosition,
+  exportModel,
   setSelectedNodeRotation,
   toggleGrid,
   toggleWireframe,
@@ -132,6 +134,7 @@ onMounted(async () => {
       <ModelInspector
         v-model:collapsed="inspectorCollapsed"
         :loading="loading"
+        :exporting="exporting"
         :has-model="hasModel"
         :error-message="errorMessage"
         :model-position="modelPosition"
@@ -145,6 +148,7 @@ onMounted(async () => {
         @update:model-position="setModelPosition"
         @update:selected-node-rotation="setSelectedNodeRotation"
         @reset-model-position="resetModelPosition"
+        @export-model="exportModel"
       />
     </main>
   </div>

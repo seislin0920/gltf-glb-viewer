@@ -23,6 +23,10 @@ import {
 } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { SpecularGlossinessCompatibilityPlugin } from "../lib/specularGlossinessPlugin";
 import {
+  deriveExportedFileName,
+  exportObjectAsGlb,
+} from "../lib/exportGlb";
+import {
   buildErrorMessage,
   collectMaterialTextures,
   createResourceSet,
@@ -58,6 +62,7 @@ export function useGlbViewer() {
   const fileInputRef = ref<HTMLInputElement | null>(null);
 
   const loading = ref(false);
+  const exporting = ref(false);
   const loadProgress = ref("");
   const errorMessage = ref("");
   const isDragging = ref(false);
@@ -531,6 +536,30 @@ export function useGlbViewer() {
     modelRoot.position.copy(initialModelPosition);
     modelRoot.updateMatrixWorld(true);
     syncModelPositionFromRoot();
+  }
+
+  async function exportModel() {
+    if (!modelRoot || exporting.value) {
+      return;
+    }
+
+    exporting.value = true;
+    errorMessage.value = "";
+
+    try {
+      const sourceFileName = stats.value?.fileName ?? "model.glb";
+      await exportObjectAsGlb({
+        root: modelRoot,
+        animations: animationClips.value,
+        fileName: deriveExportedFileName(sourceFileName),
+        wireframeEnabled: wireframeVisible.value,
+      });
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "匯出 GLB 失敗，請稍後再試。";
+    } finally {
+      exporting.value = false;
+    }
   }
 
   async function loadFiles(files: File[]) {
@@ -1206,6 +1235,7 @@ export function useGlbViewer() {
   return {
     fileInputRef,
     loading,
+    exporting,
     loadProgress,
     errorMessage,
     isDragging,
@@ -1239,6 +1269,7 @@ export function useGlbViewer() {
     toggleMoveMode,
     setModelPosition,
     resetModelPosition,
+    exportModel,
     setSelectedNodeRotation,
     toggleGrid,
     toggleWireframe,

@@ -6,6 +6,7 @@ const { onScrubPointerDown } = useScrubInput();
 
 const props = defineProps<{
   loading: boolean;
+  exporting: boolean;
   hasModel: boolean;
   errorMessage: string;
   modelPosition: Vector3Values;
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   "update:model-position": [position: Vector3Values];
   "update:selected-node-rotation": [rotation: Vector3Values];
   "reset-model-position": [];
+  "export-model": [];
 }>();
 
 function setModelAxis(axis: keyof Vector3Values, value: number) {
@@ -196,6 +198,25 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
         <p class="position-hint muted">
           在輸入框按住並左右拖曳可微調數值；開啟檢視區移動模式後，也可拖曳三軸 Gizmo 調整位置。
         </p>
+      </section>
+
+      <section v-if="hasModel" class="panel">
+        <div class="panel-heading">
+          <span>匯出 GLB</span>
+        </div>
+        <p class="export-hint muted">
+          將目前場景中的位置、旋轉與縮放變換寫入 GLB 並下載。
+        </p>
+        <div class="export-actions">
+          <button
+            class="export-button"
+            type="button"
+            :disabled="exporting || loading"
+            @click="emit('export-model')"
+          >
+            {{ exporting ? "匯出中…" : "下載 GLB" }}
+          </button>
+        </div>
       </section>
 
       <section v-if="selectedNodeDetails" class="panel">
@@ -549,6 +570,27 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
 
 .position-hint {
   @apply m-0 px-3 pb-3 text-[13px];
+}
+
+.export-hint {
+  @apply m-0 px-3 pb-2 text-[13px];
+}
+
+.export-actions {
+  @apply px-3 pb-3;
+}
+
+.export-button {
+  @apply min-h-[38px] w-full cursor-pointer rounded-button border border-line-strong bg-surface-2 px-3 text-[13px] font-bold text-text transition-[border-color,color,opacity] duration-150;
+}
+
+.export-button:hover:not(:disabled) {
+  border-color: rgba(76, 201, 166, 0.65);
+  @apply text-accent-strong;
+}
+
+.export-button:disabled {
+  @apply cursor-not-allowed opacity-60;
 }
 
 .compact-button {
