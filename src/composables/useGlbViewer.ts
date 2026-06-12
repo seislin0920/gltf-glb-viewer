@@ -76,6 +76,7 @@ export function useGlbViewer() {
   const nodeSearch = ref("");
   const moveModeEnabled = ref(false);
   const modelPosition = ref<Vector3Values>({ x: 0, y: 0, z: 0 });
+  const selectedNodeRotation = ref<Vector3Values | null>(null);
 
   const hasModel = computed(() => modelLoaded.value);
   const sceneNodeById = computed(
@@ -105,6 +106,7 @@ export function useGlbViewer() {
   });
   const selectedNodeDetails = computed<SelectedNodeDetails | null>(() => {
     modelPosition.value;
+    selectedNodeRotation.value;
 
     const node = selectedNode.value;
 
@@ -440,6 +442,46 @@ export function useGlbViewer() {
 
   function roundPositionComponent(value: number) {
     return Math.round(value * 1000) / 1000;
+  }
+
+  function roundRotationComponent(value: number) {
+    return Math.round(value * 100) / 100;
+  }
+
+  function syncSelectedNodeRotation() {
+    const object = selectedNodeId.value
+      ? objectByNodeId.get(selectedNodeId.value)
+      : null;
+
+    if (!object) {
+      selectedNodeRotation.value = null;
+      return;
+    }
+
+    selectedNodeRotation.value = {
+      x: roundRotationComponent(THREE.MathUtils.radToDeg(object.rotation.x)),
+      y: roundRotationComponent(THREE.MathUtils.radToDeg(object.rotation.y)),
+      z: roundRotationComponent(THREE.MathUtils.radToDeg(object.rotation.z)),
+    };
+  }
+
+  function setSelectedNodeRotation(rotation: Vector3Values) {
+    const object = selectedNodeId.value
+      ? objectByNodeId.get(selectedNodeId.value)
+      : null;
+
+    if (!object) {
+      return;
+    }
+
+    object.rotation.set(
+      THREE.MathUtils.degToRad(rotation.x),
+      THREE.MathUtils.degToRad(rotation.y),
+      THREE.MathUtils.degToRad(rotation.z),
+      object.rotation.order,
+    );
+    object.updateMatrixWorld(true);
+    syncSelectedNodeRotation();
   }
 
   function applyMoveModeAttachment() {
@@ -816,6 +858,7 @@ export function useGlbViewer() {
     }
 
     selectedNodeId.value = nodeId;
+    syncSelectedNodeRotation();
     updateSelectionOutline(object);
 
     if (scrollIntoView) {
@@ -825,6 +868,7 @@ export function useGlbViewer() {
 
   function clearSelection() {
     selectedNodeId.value = "";
+    selectedNodeRotation.value = null;
     clearSelectionOutline();
   }
 
@@ -1181,6 +1225,7 @@ export function useGlbViewer() {
     selectedNodeDetails,
     moveModeEnabled,
     modelPosition,
+    selectedNodeRotation,
     bindViewportRefs,
     pickFiles,
     handleFileInput,
@@ -1194,6 +1239,7 @@ export function useGlbViewer() {
     toggleMoveMode,
     setModelPosition,
     resetModelPosition,
+    setSelectedNodeRotation,
     toggleGrid,
     toggleWireframe,
     setBackgroundMode,

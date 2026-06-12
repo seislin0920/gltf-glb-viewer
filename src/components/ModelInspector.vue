@@ -1,11 +1,15 @@
 <script setup lang="ts">
+import { useScrubInput } from "../composables/useScrubInput";
 import type { ModelStats, SelectedNodeDetails, Vector3Values } from "../types/glb-viewer";
+
+const { onScrubPointerDown } = useScrubInput();
 
 const props = defineProps<{
   loading: boolean;
   hasModel: boolean;
   errorMessage: string;
   modelPosition: Vector3Values;
+  selectedNodeRotation: Vector3Values | null;
   selectedNodeDetails: SelectedNodeDetails | null;
   stats: ModelStats | null;
   isAnimationPlaying: boolean;
@@ -18,8 +22,27 @@ const emit = defineEmits<{
   "toggle-animation-playback": [];
   "play-animation": [index: number];
   "update:model-position": [position: Vector3Values];
+  "update:selected-node-rotation": [rotation: Vector3Values];
   "reset-model-position": [];
 }>();
+
+function setModelAxis(axis: keyof Vector3Values, value: number) {
+  emit("update:model-position", {
+    ...props.modelPosition,
+    [axis]: value,
+  });
+}
+
+function setRotationAxis(axis: keyof Vector3Values, value: number) {
+  if (!props.selectedNodeRotation) {
+    return;
+  }
+
+  emit("update:selected-node-rotation", {
+    ...props.selectedNodeRotation,
+    [axis]: value,
+  });
+}
 
 function updateAxis(axis: keyof Vector3Values, event: Event) {
   const input = event.target as HTMLInputElement;
@@ -29,10 +52,18 @@ function updateAxis(axis: keyof Vector3Values, event: Event) {
     return;
   }
 
-  emit("update:model-position", {
-    ...props.modelPosition,
-    [axis]: value,
-  });
+  setModelAxis(axis, value);
+}
+
+function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
+  const input = event.target as HTMLInputElement;
+  const value = Number.parseFloat(input.value);
+
+  if (Number.isNaN(value)) {
+    return;
+  }
+
+  setRotationAxis(axis, value);
 }
 </script>
 
@@ -120,6 +151,13 @@ function updateAxis(axis: keyof Vector3Values, event: Event) {
                 step="0.01"
                 :value="modelPosition.x"
                 aria-label="模型 X 位置"
+                @pointerdown="
+                  onScrubPointerDown($event, {
+                    step: 1,
+                    getValue: () => modelPosition.x,
+                    onUpdate: (value) => setModelAxis('x', value),
+                  })
+                "
                 @change="updateAxis('x', $event)"
               />
               <input
@@ -128,6 +166,13 @@ function updateAxis(axis: keyof Vector3Values, event: Event) {
                 step="0.01"
                 :value="modelPosition.y"
                 aria-label="模型 Y 位置"
+                @pointerdown="
+                  onScrubPointerDown($event, {
+                    step: 1,
+                    getValue: () => modelPosition.y,
+                    onUpdate: (value) => setModelAxis('y', value),
+                  })
+                "
                 @change="updateAxis('y', $event)"
               />
               <input
@@ -136,12 +181,21 @@ function updateAxis(axis: keyof Vector3Values, event: Event) {
                 step="0.01"
                 :value="modelPosition.z"
                 aria-label="模型 Z 位置"
+                @pointerdown="
+                  onScrubPointerDown($event, {
+                    step: 1,
+                    getValue: () => modelPosition.z,
+                    onUpdate: (value) => setModelAxis('z', value),
+                  })
+                "
                 @change="updateAxis('z', $event)"
               />
             </div>
           </div>
         </div>
-        <p class="position-hint muted">開啟檢視區移動模式後，也可拖曳三軸 Gizmo 調整位置。</p>
+        <p class="position-hint muted">
+          在輸入框按住並左右拖曳可微調數值；開啟檢視區移動模式後，也可拖曳三軸 Gizmo 調整位置。
+        </p>
       </section>
 
       <section v-if="selectedNodeDetails" class="panel">
@@ -164,9 +218,54 @@ function updateAxis(axis: keyof Vector3Values, event: Event) {
             </div>
             <div class="transform-grid__row" role="row">
               <span role="rowheader">旋轉</span>
-              <span>{{ selectedNodeDetails.transform.rotation.x }}</span>
-              <span>{{ selectedNodeDetails.transform.rotation.y }}</span>
-              <span>{{ selectedNodeDetails.transform.rotation.z }}</span>
+              <input
+                v-if="selectedNodeRotation"
+                class="position-input"
+                type="number"
+                step="0.1"
+                :value="selectedNodeRotation.x"
+                aria-label="節點 X 旋轉（度）"
+                @pointerdown="
+                  onScrubPointerDown($event, {
+                    step: 1,
+                    getValue: () => selectedNodeRotation!.x,
+                    onUpdate: (value) => setRotationAxis('x', value),
+                  })
+                "
+                @change="updateRotationAxis('x', $event)"
+              />
+              <input
+                v-if="selectedNodeRotation"
+                class="position-input"
+                type="number"
+                step="0.1"
+                :value="selectedNodeRotation.y"
+                aria-label="節點 Y 旋轉（度）"
+                @pointerdown="
+                  onScrubPointerDown($event, {
+                    step: 1,
+                    getValue: () => selectedNodeRotation!.y,
+                    onUpdate: (value) => setRotationAxis('y', value),
+                  })
+                "
+                @change="updateRotationAxis('y', $event)"
+              />
+              <input
+                v-if="selectedNodeRotation"
+                class="position-input"
+                type="number"
+                step="0.1"
+                :value="selectedNodeRotation.z"
+                aria-label="節點 Z 旋轉（度）"
+                @pointerdown="
+                  onScrubPointerDown($event, {
+                    step: 1,
+                    getValue: () => selectedNodeRotation!.z,
+                    onUpdate: (value) => setRotationAxis('z', value),
+                  })
+                "
+                @change="updateRotationAxis('z', $event)"
+              />
             </div>
             <div class="transform-grid__row" role="row">
               <span role="rowheader">縮放</span>
@@ -445,7 +544,7 @@ function updateAxis(axis: keyof Vector3Values, event: Event) {
 }
 
 .position-input {
-  @apply min-h-[30px] w-full min-w-0 rounded-small border border-line-strong bg-surface px-2 py-1 text-center text-sm text-text tabular-nums;
+  @apply min-h-[30px] w-full min-w-0 cursor-ew-resize rounded-small border border-line-strong bg-surface px-2 py-1 text-center text-sm text-text tabular-nums;
 }
 
 .position-hint {

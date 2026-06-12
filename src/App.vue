@@ -32,6 +32,7 @@ const {
   selectedNodeDetails,
   moveModeEnabled,
   modelPosition,
+  selectedNodeRotation,
   bindViewportRefs,
   pickFiles,
   handleFileInput,
@@ -45,6 +46,7 @@ const {
   toggleMoveMode,
   setModelPosition,
   resetModelPosition,
+  setSelectedNodeRotation,
   toggleGrid,
   toggleWireframe,
   setBackgroundMode,
@@ -133,6 +135,7 @@ onMounted(async () => {
         :has-model="hasModel"
         :error-message="errorMessage"
         :model-position="modelPosition"
+        :selected-node-rotation="selectedNodeRotation"
         :selected-node-details="selectedNodeDetails"
         :stats="stats"
         :is-animation-playing="isAnimationPlaying"
@@ -140,6 +143,7 @@ onMounted(async () => {
         @toggle-animation-playback="toggleAnimationPlayback"
         @play-animation="playAnimation"
         @update:model-position="setModelPosition"
+        @update:selected-node-rotation="setSelectedNodeRotation"
         @reset-model-position="resetModelPosition"
       />
     </main>
