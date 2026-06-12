@@ -7,6 +7,7 @@ defineProps<{
   visibleSceneNodes: SceneNode[]
   expandedNodeIds: Set<string>
   selectedNodeId: string
+  selectedNodeIds: Set<string>
 }>()
 
 const nodeSearch = defineModel<string>('nodeSearch', { required: true })
@@ -16,8 +17,13 @@ const emit = defineEmits<{
   'expand-all': []
   'collapse-all': []
   'toggle-expansion': [nodeId: string]
-  'select-node': [nodeId: string]
+  'select-node': [nodeId: string, additive?: boolean]
+  'toggle-node-selection': [nodeId: string]
 }>()
+
+function handleNodeClick(nodeId: string, event: MouseEvent) {
+  emit('select-node', nodeId, event.ctrlKey || event.metaKey)
+}
 </script>
 
 <template>
@@ -73,12 +79,19 @@ const emit = defineEmits<{
 
         <p v-if="!hasModel" class="tree-empty">載入模型後會顯示完整節點階層。</p>
 
-        <div v-else class="node-tree" role="tree" aria-label="模型節點階層">
+        <p v-if="hasModel && selectedNodeIds.size > 0" class="selection-hint muted">
+          已選 {{ selectedNodeIds.size }} 個節點。Ctrl+點擊或勾選可加入旋翼動畫目標。
+        </p>
+
+        <div v-if="hasModel" class="node-tree" role="tree" aria-label="模型節點階層">
           <div
             v-for="node in visibleSceneNodes"
             :key="node.id"
             class="tree-row"
-            :class="{ selected: selectedNodeId === node.id }"
+            :class="{
+              selected: selectedNodeId === node.id,
+              checked: selectedNodeIds.has(node.id),
+            }"
             :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
           >
             <button
@@ -94,13 +107,22 @@ const emit = defineEmits<{
               </svg>
             </button>
 
+            <label class="node-checkbox" @click.stop>
+              <input
+                type="checkbox"
+                :checked="selectedNodeIds.has(node.id)"
+                :aria-label="`選取 ${node.name} 作為旋翼動畫目標`"
+                @change="emit('toggle-node-selection', node.id)"
+              />
+            </label>
+
             <button
               class="node-entry"
               type="button"
               role="treeitem"
               :aria-selected="selectedNodeId === node.id"
               :data-node-id="node.id"
-              @click="emit('select-node', node.id)"
+              @click="handleNodeClick(node.id, $event)"
             >
               <span class="node-type">{{ node.type }}</span>
               <span class="node-name">{{ node.name }}</span>
@@ -220,10 +242,32 @@ const emit = defineEmits<{
   @apply bg-selected;
 }
 
+.tree-row.checked:not(.selected) {
+  background: rgba(45, 140, 255, 0.22);
+}
+
 .tree-row.selected .node-entry,
 .tree-row.selected .tree-toggle,
-.tree-row.selected .node-type {
+.tree-row.selected .node-type,
+.tree-row.checked .node-entry,
+.tree-row.checked .node-type {
   @apply text-white;
+}
+
+.node-checkbox {
+  @apply inline-flex shrink-0 items-center px-0.5;
+}
+
+.node-checkbox input {
+  @apply h-3.5 w-3.5 cursor-pointer accent-accent;
+}
+
+.selection-hint {
+  @apply m-0 px-2.5 pb-2 text-xs leading-snug;
+}
+
+.muted {
+  @apply text-text-muted;
 }
 
 .tree-toggle {
@@ -247,7 +291,7 @@ const emit = defineEmits<{
 }
 
 .node-entry {
-  @apply grid h-[30px] w-full min-w-0 cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-[7px] bg-transparent pr-2 pl-0 text-left text-text transition-[border-color,background-color,color] duration-150;
+  @apply grid h-[30px] min-w-0 flex-1 cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-[7px] bg-transparent pr-2 pl-0 text-left text-text transition-[border-color,background-color,color] duration-150;
 }
 
 .node-type {

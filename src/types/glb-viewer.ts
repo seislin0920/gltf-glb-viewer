@@ -40,6 +40,25 @@ export interface SceneNode {
   path: string
 }
 
+export type PivotAxisMode = 'auto' | 'manual'
+
+export interface RotorTargetConfig {
+  nodeId: string
+  pivotMode: PivotAxisMode
+  pivot: Vector3Values
+  axisMode: PivotAxisMode
+  axis: Vector3Values
+  reverse: boolean
+  rpm: number
+  duration: number
+  keyframes: number
+}
+
+export interface RotorAnimationDefaults {
+  animationName: string
+  keyframes: number
+}
+
 export interface SelectedNodeDetails {
   name: string
   type: string

@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { useScrubInput } from "../composables/useScrubInput";
-import type { ModelStats, SelectedNodeDetails, Vector3Values } from "../types/glb-viewer";
+import RotorAnimationPanel from "./RotorAnimationPanel.vue";
+import type {
+  ModelStats,
+  RotorTargetConfig,
+  SelectedNodeDetails,
+  Vector3Values,
+} from "../types/glb-viewer";
 
 const { onScrubPointerDown } = useScrubInput();
 
@@ -15,7 +21,21 @@ const props = defineProps<{
   stats: ModelStats | null;
   isAnimationPlaying: boolean;
   activeAnimationIndex: number;
+  rotorTargetConfigList: Array<{
+    nodeId: string;
+    nodeName: string;
+    config: RotorTargetConfig;
+  }>;
+  hasImportedAnimations: boolean;
+  rotorAnimationApplied: boolean;
+  canApplyRotorAnimation: boolean;
+  applyingRotorAnimation: boolean;
+  removingRotorAnimation: boolean;
 }>();
+
+const rotorAnimationName = defineModel<string>("rotorAnimationName", {
+  required: true,
+});
 
 const collapsed = defineModel<boolean>("collapsed", { default: false });
 
@@ -26,6 +46,10 @@ const emit = defineEmits<{
   "update:selected-node-rotation": [rotation: Vector3Values];
   "reset-model-position": [];
   "export-model": [];
+  "update-rotor-config": [nodeId: string, patch: Partial<RotorTargetConfig>];
+  "detect-rotor": [nodeId: string, kind: "pivot" | "axis" | "both"];
+  "apply-rotor-animation": [];
+  "remove-rotor-animation": [];
 }>();
 
 function setModelAxis(axis: keyof Vector3Values, value: number) {
@@ -380,6 +404,20 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
           </div>
         </dl>
       </section>
+
+      <RotorAnimationPanel
+        v-model:animation-name="rotorAnimationName"
+        :targets="rotorTargetConfigList"
+        :has-imported-animations="hasImportedAnimations"
+        :rotor-animation-applied="rotorAnimationApplied"
+        :can-apply-rotor-animation="canApplyRotorAnimation"
+        :applying="applyingRotorAnimation"
+        :removing="removingRotorAnimation"
+        @update-config="(nodeId, patch) => emit('update-rotor-config', nodeId, patch)"
+        @detect="(nodeId, kind) => emit('detect-rotor', nodeId, kind)"
+        @apply="emit('apply-rotor-animation')"
+        @remove="emit('remove-rotor-animation')"
+      />
 
       <section v-if="stats?.animations.length" class="panel">
         <div class="panel-heading">

@@ -28,12 +28,20 @@ const {
   sceneNodes,
   expandedNodeIds,
   selectedNodeId,
+  selectedNodeIds,
   nodeSearch,
   visibleSceneNodes,
   selectedNodeDetails,
   moveModeEnabled,
   modelPosition,
   selectedNodeRotation,
+  rotorTargetConfigList,
+  rotorAnimationName,
+  rotorAnimationApplied,
+  hasImportedAnimations,
+  canApplyRotorAnimation,
+  applyingRotorAnimation,
+  removingRotorAnimation,
   bindViewportRefs,
   pickFiles,
   handleFileInput,
@@ -58,6 +66,11 @@ const {
   expandAllNodes,
   collapseAllNodes,
   selectNode,
+  toggleNodeSelection,
+  updateRotorTargetConfig,
+  detectRotorPivotAxis,
+  applyRotorAnimation,
+  removeRotorAnimation,
 } = useGlbViewer()
 
 onMounted(async () => {
@@ -104,10 +117,12 @@ onMounted(async () => {
         v-model:node-search="nodeSearch"
         :expanded-node-ids="expandedNodeIds"
         :selected-node-id="selectedNodeId"
+        :selected-node-ids="selectedNodeIds"
         @expand-all="expandAllNodes"
         @collapse-all="collapseAllNodes"
         @toggle-expansion="toggleNodeExpansion"
-        @select-node="selectNode"
+        @select-node="(nodeId, additive) => selectNode(nodeId, false, additive)"
+        @toggle-node-selection="(nodeId) => toggleNodeSelection(nodeId, true)"
       />
 
       <ModelViewport
@@ -143,12 +158,23 @@ onMounted(async () => {
         :stats="stats"
         :is-animation-playing="isAnimationPlaying"
         :active-animation-index="activeAnimationIndex"
+        v-model:rotor-animation-name="rotorAnimationName"
+        :rotor-target-config-list="rotorTargetConfigList"
+        :has-imported-animations="hasImportedAnimations"
+        :rotor-animation-applied="rotorAnimationApplied"
+        :can-apply-rotor-animation="canApplyRotorAnimation"
+        :applying-rotor-animation="applyingRotorAnimation"
+        :removing-rotor-animation="removingRotorAnimation"
         @toggle-animation-playback="toggleAnimationPlayback"
         @play-animation="playAnimation"
         @update:model-position="setModelPosition"
         @update:selected-node-rotation="setSelectedNodeRotation"
         @reset-model-position="resetModelPosition"
         @export-model="exportModel"
+        @update-rotor-config="updateRotorTargetConfig"
+        @detect-rotor="detectRotorPivotAxis"
+        @apply-rotor-animation="applyRotorAnimation"
+        @remove-rotor-animation="removeRotorAnimation"
       />
     </main>
   </div>
