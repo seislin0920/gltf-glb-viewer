@@ -146,9 +146,9 @@ function updateAxis(axis: keyof Vector3Values, event: Event) {
 
       <section v-if="selectedNodeDetails" class="panel">
         <div class="panel-heading">
-          <span>變換（世界）</span>
+          <span>變換（局部）</span>
         </div>
-        <div class="transform-grid" role="table" aria-label="節點世界變換">
+        <div class="transform-grid" role="table" aria-label="節點局部變換">
           <div class="transform-grid__inner">
             <div class="transform-grid__header" role="row">
               <span role="columnheader"></span>

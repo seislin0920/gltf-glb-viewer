@@ -33,7 +33,6 @@ import {
   formatInteger,
   formatRotationDegrees,
   formatTransformVector,
-  getWorldTransform,
   getFileKey,
   getModelFormat,
   getObjectName,
@@ -120,7 +119,6 @@ export function useGlbViewer() {
     }
 
     const summary = summarizeObject(object);
-    const worldTransform = getWorldTransform(object);
 
     return {
       name: node.name,
@@ -130,9 +128,9 @@ export function useGlbViewer() {
       triangleCount: formatInteger(summary.triangleCount),
       dimensions: summary.dimensions,
       transform: {
-        position: formatTransformVector(worldTransform.position),
-        rotation: formatRotationDegrees(worldTransform.rotation),
-        scale: formatTransformVector(worldTransform.scale),
+        position: formatTransformVector(object.position),
+        rotation: formatRotationDegrees(object.rotation),
+        scale: formatTransformVector(object.scale),
       },
     };
   });
@@ -161,6 +159,8 @@ export function useGlbViewer() {
   const clock = new THREE.Clock();
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
+  // 模型載入時的原始中心；UI 座標以 -originalCenter（座標軸原點）為參考原點
+  const modelOriginOffset = new THREE.Vector3();
   const objectByNodeId = new Map<string, THREE.Object3D>();
   const nodeIdByObjectUuid = new Map<string, string>();
 
@@ -432,9 +432,9 @@ export function useGlbViewer() {
     }
 
     modelPosition.value = {
-      x: roundPositionComponent(modelRoot.position.x),
-      y: roundPositionComponent(modelRoot.position.y),
-      z: roundPositionComponent(modelRoot.position.z),
+      x: roundPositionComponent(modelRoot.position.x + modelOriginOffset.x),
+      y: roundPositionComponent(modelRoot.position.y + modelOriginOffset.y),
+      z: roundPositionComponent(modelRoot.position.z + modelOriginOffset.z),
     };
   }
 
@@ -472,7 +472,11 @@ export function useGlbViewer() {
       return;
     }
 
-    modelRoot.position.set(position.x, position.y, position.z);
+    modelRoot.position.set(
+      position.x - modelOriginOffset.x,
+      position.y - modelOriginOffset.y,
+      position.z - modelOriginOffset.z,
+    );
     modelRoot.updateMatrixWorld(true);
     syncModelPositionFromRoot();
   }
@@ -568,6 +572,7 @@ export function useGlbViewer() {
     root.position.sub(originalCenter);
     scene.add(root);
     modelRoot = root;
+    modelOriginOffset.copy(originalCenter);
     modelLoaded.value = true;
     animationClips.value = gltf.animations;
     activeAnimationIndex.value = 0;
@@ -618,6 +623,7 @@ export function useGlbViewer() {
     moveModeEnabled.value = false;
     modelPosition.value = { x: 0, y: 0, z: 0 };
     initialModelPosition = null;
+    modelOriginOffset.set(0, 0, 0);
 
     if (!scene || !modelRoot) {
       modelRoot = null;
