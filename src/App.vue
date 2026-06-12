@@ -30,6 +30,8 @@ const {
   nodeSearch,
   visibleSceneNodes,
   selectedNodeDetails,
+  moveModeEnabled,
+  modelPosition,
   bindViewportRefs,
   pickFiles,
   handleFileInput,
@@ -40,6 +42,9 @@ const {
   handleCanvasPointerDown,
   handleCanvasPointerUp,
   resetCamera,
+  toggleMoveMode,
+  setModelPosition,
+  resetModelPosition,
   toggleGrid,
   toggleWireframe,
   setBackgroundMode,
@@ -108,12 +113,14 @@ onMounted(async () => {
         :loading="loading"
         :load-progress="loadProgress"
         :is-dragging="isDragging"
+        :move-mode-enabled="moveModeEnabled"
         :grid-visible="gridVisible"
         :wireframe-visible="wireframeVisible"
         :background-mode="backgroundMode"
         @pointerdown="handleCanvasPointerDown"
         @pointerup="handleCanvasPointerUp"
         @reset-camera="resetCamera"
+        @toggle-move-mode="toggleMoveMode"
         @toggle-grid="toggleGrid"
         @toggle-wireframe="toggleWireframe"
         @set-background-mode="setBackgroundMode"
@@ -125,12 +132,15 @@ onMounted(async () => {
         :loading="loading"
         :has-model="hasModel"
         :error-message="errorMessage"
+        :model-position="modelPosition"
         :selected-node-details="selectedNodeDetails"
         :stats="stats"
         :is-animation-playing="isAnimationPlaying"
         :active-animation-index="activeAnimationIndex"
         @toggle-animation-playback="toggleAnimationPlayback"
         @play-animation="playAnimation"
+        @update:model-position="setModelPosition"
+        @reset-model-position="resetModelPosition"
       />
     </main>
   </div>

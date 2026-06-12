@@ -1,5 +1,11 @@
 export type BackgroundMode = 'studio' | 'light' | 'transparent'
 
+export interface Vector3Values {
+  x: number
+  y: number
+  z: number
+}
+
 export interface AnimationInfo {
   name: string
   duration: string

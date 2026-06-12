@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { ModelStats, SelectedNodeDetails } from "../types/glb-viewer";
+import type { ModelStats, SelectedNodeDetails, Vector3Values } from "../types/glb-viewer";
 
-defineProps<{
+const props = defineProps<{
   loading: boolean;
   hasModel: boolean;
   errorMessage: string;
+  modelPosition: Vector3Values;
   selectedNodeDetails: SelectedNodeDetails | null;
   stats: ModelStats | null;
   isAnimationPlaying: boolean;
@@ -16,7 +17,23 @@ const collapsed = defineModel<boolean>("collapsed", { default: false });
 const emit = defineEmits<{
   "toggle-animation-playback": [];
   "play-animation": [index: number];
+  "update:model-position": [position: Vector3Values];
+  "reset-model-position": [];
 }>();
+
+function updateAxis(axis: keyof Vector3Values, event: Event) {
+  const input = event.target as HTMLInputElement;
+  const value = Number.parseFloat(input.value);
+
+  if (Number.isNaN(value)) {
+    return;
+  }
+
+  emit("update:model-position", {
+    ...props.modelPosition,
+    [axis]: value,
+  });
+}
 </script>
 
 <template>
@@ -76,6 +93,91 @@ const emit = defineEmits<{
         <p v-else class="muted">選擇單一 GLB，或同批選取 GLTF 與相依資源。</p>
       </section>
 
+      <section v-if="hasModel" class="panel">
+        <div class="panel-heading">
+          <span>模型位置</span>
+          <button
+            class="compact-button"
+            type="button"
+            @click="emit('reset-model-position')"
+          >
+            重設位置
+          </button>
+        </div>
+        <div class="transform-grid" role="table" aria-label="模型位置">
+          <div class="transform-grid__inner">
+            <div class="transform-grid__header" role="row">
+              <span role="columnheader"></span>
+              <span role="columnheader">X</span>
+              <span role="columnheader">Y</span>
+              <span role="columnheader">Z</span>
+            </div>
+            <div class="transform-grid__row" role="row">
+              <span role="rowheader">位置</span>
+              <input
+                class="position-input"
+                type="number"
+                step="0.01"
+                :value="modelPosition.x"
+                aria-label="模型 X 位置"
+                @change="updateAxis('x', $event)"
+              />
+              <input
+                class="position-input"
+                type="number"
+                step="0.01"
+                :value="modelPosition.y"
+                aria-label="模型 Y 位置"
+                @change="updateAxis('y', $event)"
+              />
+              <input
+                class="position-input"
+                type="number"
+                step="0.01"
+                :value="modelPosition.z"
+                aria-label="模型 Z 位置"
+                @change="updateAxis('z', $event)"
+              />
+            </div>
+          </div>
+        </div>
+        <p class="position-hint muted">開啟檢視區移動模式後，也可拖曳三軸 Gizmo 調整位置。</p>
+      </section>
+
+      <section v-if="selectedNodeDetails" class="panel">
+        <div class="panel-heading">
+          <span>變換（世界）</span>
+        </div>
+        <div class="transform-grid" role="table" aria-label="節點世界變換">
+          <div class="transform-grid__inner">
+            <div class="transform-grid__header" role="row">
+              <span role="columnheader"></span>
+              <span role="columnheader">X</span>
+              <span role="columnheader">Y</span>
+              <span role="columnheader">Z</span>
+            </div>
+            <div class="transform-grid__row" role="row">
+              <span role="rowheader">位置</span>
+              <span>{{ selectedNodeDetails.transform.position.x }}</span>
+              <span>{{ selectedNodeDetails.transform.position.y }}</span>
+              <span>{{ selectedNodeDetails.transform.position.z }}</span>
+            </div>
+            <div class="transform-grid__row" role="row">
+              <span role="rowheader">旋轉</span>
+              <span>{{ selectedNodeDetails.transform.rotation.x }}</span>
+              <span>{{ selectedNodeDetails.transform.rotation.y }}</span>
+              <span>{{ selectedNodeDetails.transform.rotation.z }}</span>
+            </div>
+            <div class="transform-grid__row" role="row">
+              <span role="rowheader">縮放</span>
+              <span>{{ selectedNodeDetails.transform.scale.x }}</span>
+              <span>{{ selectedNodeDetails.transform.scale.y }}</span>
+              <span>{{ selectedNodeDetails.transform.scale.z }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section v-if="selectedNodeDetails" class="panel">
         <div class="panel-heading">
           <span>已選節點</span>
@@ -111,65 +213,6 @@ const emit = defineEmits<{
           </div>
         </dl>
       </section>
-
-      <section v-if="selectedNodeDetails" class="panel">
-        <div class="panel-heading">
-          <span>變換</span>
-        </div>
-        <div class="transform-grid" role="table" aria-label="節點變換">
-          <div class="transform-grid__inner">
-            <div class="transform-grid__header" role="row">
-              <span role="columnheader"></span>
-              <span role="columnheader">X</span>
-              <span role="columnheader">Y</span>
-              <span role="columnheader">Z</span>
-            </div>
-            <div class="transform-grid__row" role="row">
-              <span role="rowheader">位置</span>
-              <span>{{ selectedNodeDetails.transform.position.x }}</span>
-              <span>{{ selectedNodeDetails.transform.position.y }}</span>
-              <span>{{ selectedNodeDetails.transform.position.z }}</span>
-            </div>
-            <div class="transform-grid__row" role="row">
-              <span role="rowheader">旋轉</span>
-              <span>{{ selectedNodeDetails.transform.rotation.x }}</span>
-              <span>{{ selectedNodeDetails.transform.rotation.y }}</span>
-              <span>{{ selectedNodeDetails.transform.rotation.z }}</span>
-            </div>
-            <div class="transform-grid__row" role="row">
-              <span role="rowheader">縮放</span>
-              <span>{{ selectedNodeDetails.transform.scale.x }}</span>
-              <span>{{ selectedNodeDetails.transform.scale.y }}</span>
-              <span>{{ selectedNodeDetails.transform.scale.z }}</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section v-if="stats" class="panel">
-        <div class="panel-heading">
-          <span>檔案</span>
-        </div>
-        <dl class="meta-list">
-          <div>
-            <dt>名稱</dt>
-            <dd>{{ stats.fileName }}</dd>
-          </div>
-          <div>
-            <dt>格式</dt>
-            <dd>{{ stats.format }}</dd>
-          </div>
-          <div>
-            <dt>大小</dt>
-            <dd>{{ stats.fileSize }}</dd>
-          </div>
-          <div>
-            <dt>同批檔案</dt>
-            <dd>{{ stats.resourceCount }}</dd>
-          </div>
-        </dl>
-      </section>
-
       <section v-if="stats" class="panel">
         <div class="panel-heading">
           <span>場景統計</span>
@@ -399,6 +442,14 @@ const emit = defineEmits<{
 
 .transform-grid__row > span:not(:first-child) {
   @apply break-all text-text-soft tabular-nums;
+}
+
+.position-input {
+  @apply min-h-[30px] w-full min-w-0 rounded-small border border-line-strong bg-surface px-2 py-1 text-center text-sm text-text tabular-nums;
+}
+
+.position-hint {
+  @apply m-0 px-3 pb-3 text-[13px];
 }
 
 .compact-button {

@@ -1,42 +1,48 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import type { BackgroundMode } from '../types/glb-viewer'
+import { ref } from "vue";
+import type { BackgroundMode } from "../types/glb-viewer";
 
 defineProps<{
-  rendererReady: boolean
-  hasModel: boolean
-  loading: boolean
-  loadProgress: string
-  isDragging: boolean
-  gridVisible: boolean
-  wireframeVisible: boolean
-  backgroundMode: BackgroundMode
-}>()
+  rendererReady: boolean;
+  hasModel: boolean;
+  loading: boolean;
+  loadProgress: string;
+  isDragging: boolean;
+  moveModeEnabled: boolean;
+  gridVisible: boolean;
+  wireframeVisible: boolean;
+  backgroundMode: BackgroundMode;
+}>();
 
 const emit = defineEmits<{
-  pointerdown: [event: PointerEvent]
-  pointerup: [event: PointerEvent]
-  'reset-camera': []
-  'toggle-grid': []
-  'toggle-wireframe': []
-  'set-background-mode': [mode: BackgroundMode]
-  'pick-files': []
-}>()
+  pointerdown: [event: PointerEvent];
+  pointerup: [event: PointerEvent];
+  "reset-camera": [];
+  "toggle-move-mode": [];
+  "toggle-grid": [];
+  "toggle-wireframe": [];
+  "set-background-mode": [mode: BackgroundMode];
+  "pick-files": [];
+}>();
 
-const canvasRef = ref<HTMLCanvasElement | null>(null)
-const viewportRef = ref<HTMLElement | null>(null)
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+const viewportRef = ref<HTMLElement | null>(null);
 
 defineExpose({
   canvasRef,
   viewportRef,
-})
+});
 </script>
 
 <template>
   <section
     ref="viewportRef"
     class="viewport"
-    :class="{ 'is-dragging': isDragging, 'has-model': hasModel }"
+    :class="{
+      'is-dragging': isDragging,
+      'has-model': hasModel,
+      'is-move-mode': moveModeEnabled,
+    }"
     aria-label="3D 模型檢視區"
   >
     <canvas
@@ -47,17 +53,22 @@ defineExpose({
 
     <div v-if="rendererReady" class="viewer-toolbar" aria-label="檢視控制">
       <button
-        class="icon-button"
+        class="icon-button pi pi-refresh"
         type="button"
         title="重設視角"
         aria-label="重設視角"
         @click="emit('reset-camera')"
-      >
-        <svg aria-hidden="true" viewBox="0 0 24 24">
-          <path d="M4 12a8 8 0 1 1 2.34 5.66" />
-          <path d="M4 18v-6h6" />
-        </svg>
-      </button>
+      ></button>
+
+      <button
+        class="icon-button pi pi-arrows-alt"
+        type="button"
+        title="移動模型"
+        aria-label="移動模型"
+        :aria-pressed="moveModeEnabled"
+        :disabled="!hasModel"
+        @click="emit('toggle-move-mode')"
+      ></button>
 
       <button
         class="icon-button"
@@ -121,7 +132,13 @@ defineExpose({
       </div>
       <h2>拖放 GLB / GLTF 到這裡</h2>
       <p>GLTF 若有外部 .bin 或貼圖，請同一次選取或拖放。</p>
-      <button class="secondary-button" type="button" @click="emit('pick-files')">選擇本機檔案</button>
+      <button
+        class="secondary-button"
+        type="button"
+        @click="emit('pick-files')"
+      >
+        選擇本機檔案
+      </button>
     </div>
 
     <div v-if="isDragging" class="drop-mask">
@@ -133,7 +150,7 @@ defineExpose({
 
     <div v-if="loading" class="status-mask" role="status">
       <div class="spinner" aria-hidden="true"></div>
-      <span>{{ loadProgress || '載入中' }}</span>
+      <span>{{ loadProgress || "載入中" }}</span>
     </div>
   </section>
 </template>
@@ -147,6 +164,20 @@ defineExpose({
 
 .viewport canvas {
   @apply absolute inset-0 block h-full w-full;
+}
+
+.viewport.is-move-mode canvas {
+  cursor: move;
+}
+
+.icon-button:disabled {
+  @apply cursor-not-allowed opacity-40;
+}
+
+.icon-button:disabled:hover {
+  border-color: var(--color-line-strong, rgba(143, 158, 173, 0.25));
+  background: var(--color-surface-2, rgba(30, 36, 44, 1));
+  @apply text-text-soft;
 }
 
 .viewer-toolbar {
@@ -168,7 +199,7 @@ defineExpose({
 }
 
 .icon-button:hover,
-.icon-button[aria-pressed='true'] {
+.icon-button[aria-pressed="true"] {
   border-color: rgba(76, 201, 166, 0.7);
   background: var(--color-accent-hover-bg);
   @apply text-accent-strong;

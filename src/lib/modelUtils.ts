@@ -144,6 +144,34 @@ export function formatTransformVector(vector: THREE.Vector3 | THREE.Euler) {
   }
 }
 
+export function formatRotationDegrees(euler: THREE.Euler) {
+  const toDegrees = (radians: number) => formatDecimal(THREE.MathUtils.radToDeg(radians))
+
+  return {
+    x: `${toDegrees(euler.x)}°`,
+    y: `${toDegrees(euler.y)}°`,
+    z: `${toDegrees(euler.z)}°`,
+  }
+}
+
+const worldPosition = new THREE.Vector3()
+const worldScale = new THREE.Vector3()
+const worldQuaternion = new THREE.Quaternion()
+const worldEuler = new THREE.Euler()
+
+export function getWorldTransform(object: THREE.Object3D) {
+  object.getWorldPosition(worldPosition)
+  object.getWorldScale(worldScale)
+  object.getWorldQuaternion(worldQuaternion)
+  worldEuler.setFromQuaternion(worldQuaternion, object.rotation.order)
+
+  return {
+    position: worldPosition,
+    rotation: worldEuler,
+    scale: worldScale,
+  }
+}
+
 export function formatDecimal(value: number) {
   return new Intl.NumberFormat('zh-TW', {
     maximumFractionDigits: value >= 10 ? 1 : 3,
