@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { useScrubInput } from "../composables/useScrubInput";
 import RotorAnimationPanel from "./RotorAnimationPanel.vue";
+import NodeColorPanel from "./NodeColorPanel.vue";
 import type {
   ModelStats,
+  NodeColorMode,
   RotorTargetConfig,
   SelectedNodeDetails,
   Vector3Values,
@@ -31,9 +33,27 @@ const props = defineProps<{
   canApplyRotorAnimation: boolean;
   applyingRotorAnimation: boolean;
   removingRotorAnimation: boolean;
+  nodeColorTargetList: Array<{
+    nodeId: string;
+    nodeName: string;
+    hasDirectMesh: boolean;
+  }>;
+  nodeColorTextureFile: File | null;
+  canApplyNodeColor: boolean;
+  canRevertNodeColor: boolean;
+  applyingNodeColor: boolean;
+  revertingNodeColor: boolean;
 }>();
 
 const rotorAnimationName = defineModel<string>("rotorAnimationName", {
+  required: true,
+});
+
+const nodeColorMode = defineModel<NodeColorMode>("nodeColorMode", {
+  required: true,
+});
+
+const nodeColorHex = defineModel<string>("nodeColorHex", {
   required: true,
 });
 
@@ -50,6 +70,9 @@ const emit = defineEmits<{
   "detect-rotor": [nodeId: string, kind: "pivot" | "axis" | "both"];
   "apply-rotor-animation": [];
   "remove-rotor-animation": [];
+  "node-color-texture-selected": [file: File | null];
+  "apply-node-color": [];
+  "revert-node-color": [];
 }>();
 
 function setModelAxis(axis: keyof Vector3Values, value: number) {
@@ -220,7 +243,8 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
           </div>
         </div>
         <p class="position-hint muted">
-          在輸入框按住並左右拖曳可微調數值；開啟檢視區移動模式後，也可拖曳三軸 Gizmo 調整位置。
+          在輸入框按住並左右拖曳可微調數值；開啟檢視區移動模式後，也可拖曳三軸
+          Gizmo 調整位置。
         </p>
       </section>
 
@@ -242,6 +266,22 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
           </button>
         </div>
       </section>
+
+      <NodeColorPanel
+        class="panel"
+        v-if="hasModel"
+        v-model:mode="nodeColorMode"
+        v-model:color-hex="nodeColorHex"
+        :targets="nodeColorTargetList"
+        :texture-file="nodeColorTextureFile"
+        :can-apply="canApplyNodeColor"
+        :can-revert="canRevertNodeColor"
+        :applying="applyingNodeColor"
+        :reverting="revertingNodeColor"
+        @texture-selected="(file) => emit('node-color-texture-selected', file)"
+        @apply="emit('apply-node-color')"
+        @revert="emit('revert-node-color')"
+      />
 
       <section v-if="selectedNodeDetails" class="panel">
         <div class="panel-heading">
@@ -413,7 +453,9 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
         :can-apply-rotor-animation="canApplyRotorAnimation"
         :applying="applyingRotorAnimation"
         :removing="removingRotorAnimation"
-        @update-config="(nodeId, patch) => emit('update-rotor-config', nodeId, patch)"
+        @update-config="
+          (nodeId, patch) => emit('update-rotor-config', nodeId, patch)
+        "
         @detect="(nodeId, kind) => emit('detect-rotor', nodeId, kind)"
         @apply="emit('apply-rotor-animation')"
         @remove="emit('remove-rotor-animation')"

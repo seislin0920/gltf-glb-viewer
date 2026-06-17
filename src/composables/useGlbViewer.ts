@@ -58,9 +58,17 @@ import {
   resetRotorPivotsToBindPose,
   validateRotorTarget,
 } from "../lib/addRotorAnimation";
+import {
+  applyNodeColor as applyNodeColorToMeshes,
+  collectDirectMeshes,
+  disposeAllNodeColorBatches,
+  revertNodeColorBatch,
+  type NodeColorBatch,
+} from "../lib/applyNodeColor";
 import type {
   BackgroundMode,
   ModelStats,
+  NodeColorMode,
   RotorTargetConfig,
   SceneNode,
   SelectedNodeDetails,
@@ -96,6 +104,12 @@ export function useGlbViewer() {
   const hasImportedAnimations = ref(false);
   const applyingRotorAnimation = ref(false);
   const removingRotorAnimation = ref(false);
+  const nodeColorMode = ref<NodeColorMode>("color");
+  const nodeColorHex = ref("#000000");
+  const nodeColorTextureFile = ref<File | null>(null);
+  const nodeColorBatches = ref<NodeColorBatch[]>([]);
+  const applyingNodeColor = ref(false);
+  const revertingNodeColor = ref(false);
   const nodeSearch = ref("");
   const moveModeEnabled = ref(false);
   const modelPosition = ref<Vector3Values>({ x: 0, y: 0, z: 0 });
@@ -172,6 +186,36 @@ export function useGlbViewer() {
       config: rotorTargetConfigs.value[nodeId] ?? createDefaultRotorTargetConfig(nodeId),
     })),
   );
+  const nodeColorTargetList = computed(() =>
+    Array.from(selectedNodeIds.value).map((nodeId) => {
+      const object = objectByNodeId.get(nodeId);
+      return {
+        nodeId,
+        nodeName: sceneNodeById.value.get(nodeId)?.name ?? nodeId,
+        hasDirectMesh: object ? collectDirectMeshes(object).length > 0 : false,
+      };
+    }),
+  );
+  const canApplyNodeColor = computed(() => {
+    if (selectedNodeIds.value.size === 0) {
+      return false;
+    }
+
+    const hasDirectMesh = nodeColorTargetList.value.some(
+      (target) => target.hasDirectMesh,
+    );
+
+    if (!hasDirectMesh) {
+      return false;
+    }
+
+    if (nodeColorMode.value === "texture") {
+      return nodeColorTextureFile.value !== null;
+    }
+
+    return true;
+  });
+  const canRevertNodeColor = computed(() => nodeColorBatches.value.length > 0);
 
   let renderer: THREE.WebGLRenderer | null = null;
   let composer: EffectComposer | null = null;
@@ -739,9 +783,12 @@ export function useGlbViewer() {
       modelLoaded.value = false;
       hasImportedAnimations.value = false;
       rotorAnimationApplied.value = false;
+      clearNodeColorBatches();
       stats.value = null;
       return;
     }
+
+    clearNodeColorBatches();
 
     scene.remove(modelRoot);
 
@@ -1060,6 +1107,122 @@ export function useGlbViewer() {
     } finally {
       removingRotorAnimation.value = false;
     }
+  }
+
+  function buildMeshByUuidMap() {
+    const meshByUuid = new Map<string, THREE.Mesh>();
+
+    if (!modelRoot) {
+      return meshByUuid;
+    }
+
+    modelRoot.traverse((object) => {
+      if (isMesh(object)) {
+        meshByUuid.set(object.uuid, object);
+      }
+    });
+
+    return meshByUuid;
+  }
+
+  function refreshMaterialStats() {
+    if (!modelRoot || !stats.value) {
+      return;
+    }
+
+    const summary = summarizeObject(modelRoot);
+    stats.value = {
+      ...stats.value,
+      materialCount: summary.materialCount,
+      textureCount: summary.textureCount,
+    };
+  }
+
+  function setNodeColorTextureFile(file: File | null) {
+    nodeColorTextureFile.value = file;
+  }
+
+  async function applyNodeColor() {
+    if (!modelRoot || applyingNodeColor.value) {
+      return;
+    }
+
+    if (selectedNodeIds.value.size === 0) {
+      errorMessage.value = "請至少選取一個節點。";
+      return;
+    }
+
+    if (!canApplyNodeColor.value) {
+      errorMessage.value = "選取的節點沒有可上色的 Mesh。";
+      return;
+    }
+
+    applyingNodeColor.value = true;
+    errorMessage.value = "";
+
+    try {
+      const objects: THREE.Object3D[] = [];
+
+      for (const nodeId of selectedNodeIds.value) {
+        const object = objectByNodeId.get(nodeId);
+
+        if (object) {
+          objects.push(object);
+        }
+      }
+
+      const { batch, skippedMeshCount } = await applyNodeColorToMeshes(objects, {
+        mode: nodeColorMode.value,
+        colorHex: nodeColorHex.value,
+        textureFile: nodeColorTextureFile.value,
+        nodeIds: Array.from(selectedNodeIds.value),
+      });
+
+      nodeColorBatches.value = [...nodeColorBatches.value, batch];
+      refreshMaterialStats();
+
+      if (skippedMeshCount > 0) {
+        errorMessage.value = `${skippedMeshCount} 個 mesh 材質不支援，已跳過。`;
+      }
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "套用上色失敗。";
+    } finally {
+      applyingNodeColor.value = false;
+    }
+  }
+
+  function revertNodeColor() {
+    if (!modelRoot || revertingNodeColor.value || nodeColorBatches.value.length === 0) {
+      return;
+    }
+
+    revertingNodeColor.value = true;
+    errorMessage.value = "";
+
+    try {
+      const batches = [...nodeColorBatches.value];
+      const batch = batches.pop();
+
+      if (!batch) {
+        return;
+      }
+
+      revertNodeColorBatch(batch, buildMeshByUuidMap());
+      nodeColorBatches.value = batches;
+      refreshMaterialStats();
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "取消上色失敗。";
+    } finally {
+      revertingNodeColor.value = false;
+    }
+  }
+
+  function clearNodeColorBatches() {
+    disposeAllNodeColorBatches(nodeColorBatches.value);
+    nodeColorBatches.value = [];
+    nodeColorTextureFile.value = null;
   }
 
   function buildSceneTree(
@@ -1581,6 +1744,14 @@ export function useGlbViewer() {
     canApplyRotorAnimation,
     applyingRotorAnimation,
     removingRotorAnimation,
+    nodeColorMode,
+    nodeColorHex,
+    nodeColorTextureFile,
+    nodeColorTargetList,
+    canApplyNodeColor,
+    canRevertNodeColor,
+    applyingNodeColor,
+    revertingNodeColor,
     nodeSearch,
     visibleSceneNodes,
     selectedNodeDetails,
@@ -1616,5 +1787,8 @@ export function useGlbViewer() {
     detectRotorPivotAxis,
     applyRotorAnimation,
     removeRotorAnimation,
+    setNodeColorTextureFile,
+    applyNodeColor,
+    revertNodeColor,
   };
 }

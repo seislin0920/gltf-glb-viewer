@@ -1,5 +1,7 @@
 export type BackgroundMode = 'studio' | 'light' | 'transparent'
 
+export type NodeColorMode = 'color' | 'texture'
+
 export interface Vector3Values {
   x: number
   y: number

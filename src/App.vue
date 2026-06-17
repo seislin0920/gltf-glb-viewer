@@ -42,6 +42,14 @@ const {
   canApplyRotorAnimation,
   applyingRotorAnimation,
   removingRotorAnimation,
+  nodeColorMode,
+  nodeColorHex,
+  nodeColorTextureFile,
+  nodeColorTargetList,
+  canApplyNodeColor,
+  canRevertNodeColor,
+  applyingNodeColor,
+  revertingNodeColor,
   bindViewportRefs,
   pickFiles,
   handleFileInput,
@@ -71,6 +79,9 @@ const {
   detectRotorPivotAxis,
   applyRotorAnimation,
   removeRotorAnimation,
+  setNodeColorTextureFile,
+  applyNodeColor,
+  revertNodeColor,
 } = useGlbViewer()
 
 onMounted(async () => {
@@ -165,6 +176,14 @@ onMounted(async () => {
         :can-apply-rotor-animation="canApplyRotorAnimation"
         :applying-rotor-animation="applyingRotorAnimation"
         :removing-rotor-animation="removingRotorAnimation"
+        v-model:node-color-mode="nodeColorMode"
+        v-model:node-color-hex="nodeColorHex"
+        :node-color-texture-file="nodeColorTextureFile"
+        :node-color-target-list="nodeColorTargetList"
+        :can-apply-node-color="canApplyNodeColor"
+        :can-revert-node-color="canRevertNodeColor"
+        :applying-node-color="applyingNodeColor"
+        :reverting-node-color="revertingNodeColor"
         @toggle-animation-playback="toggleAnimationPlayback"
         @play-animation="playAnimation"
         @update:model-position="setModelPosition"
@@ -175,6 +194,9 @@ onMounted(async () => {
         @detect-rotor="detectRotorPivotAxis"
         @apply-rotor-animation="applyRotorAnimation"
         @remove-rotor-animation="removeRotorAnimation"
+        @node-color-texture-selected="setNodeColorTextureFile"
+        @apply-node-color="applyNodeColor"
+        @revert-node-color="revertNodeColor"
       />
     </main>
   </div>
