@@ -23,7 +23,7 @@ const {
   wireframeVisible,
   backgroundMode,
   isAnimationPlaying,
-  activeAnimationIndex,
+  activeAnimationIndices,
   stats,
   sceneNodes,
   expandedNodeIds,
@@ -167,7 +167,7 @@ onMounted(async () => {
         :selected-node-details="selectedNodeDetails"
         :stats="stats"
         :is-animation-playing="isAnimationPlaying"
-        :active-animation-index="activeAnimationIndex"
+        :active-animation-indices="activeAnimationIndices"
         v-model:rotor-animation-name="rotorAnimationName"
         :rotor-target-config-list="rotorTargetConfigList"
         :rotor-animation-applied="rotorAnimationApplied"

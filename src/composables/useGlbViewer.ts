@@ -92,7 +92,7 @@ export function useGlbViewer() {
   const wireframeVisible = ref(false);
   const backgroundMode = ref<BackgroundMode>("studio");
   const isAnimationPlaying = ref(false);
-  const activeAnimationIndex = ref(0);
+  const activeAnimationIndices = ref<Set<number>>(new Set());
   const stats = ref<ModelStats | null>(null);
   const animationClips = ref<THREE.AnimationClip[]>([]);
   const importedAnimationClips = ref<THREE.AnimationClip[]>([]);
@@ -730,7 +730,8 @@ export function useGlbViewer() {
     sessionRotorPivots = [];
     importedAnimationClips.value = gltf.animations;
     animationClips.value = [...gltf.animations];
-    activeAnimationIndex.value = 0;
+    activeAnimationIndices.value =
+      gltf.animations.length > 0 ? new Set([0]) : new Set();
     mixer = gltf.animations.length > 0 ? new THREE.AnimationMixer(root) : null;
 
     buildSceneTree(root, primaryFile.name);
@@ -870,19 +871,49 @@ export function useGlbViewer() {
     applySceneBackground();
   }
 
+  function stopAnimationAction(index: number) {
+    if (!mixer) {
+      return;
+    }
+
+    const clip = animationClips.value[index];
+    if (!clip) {
+      return;
+    }
+
+    mixer.clipAction(clip).stop();
+  }
+
   function playAnimation(index: number) {
     if (!mixer || !animationClips.value[index]) {
       return;
     }
 
-    mixer.stopAllAction();
-    mixer.clipAction(animationClips.value[index]).reset().play();
-    activeAnimationIndex.value = index;
+    const clip = animationClips.value[index];
+    const next = new Set(activeAnimationIndices.value);
+
+    if (next.has(index)) {
+      stopAnimationAction(index);
+      next.delete(index);
+      activeAnimationIndices.value = next;
+      if (next.size === 0) {
+        isAnimationPlaying.value = false;
+      }
+      return;
+    }
+
+    mixer.clipAction(clip).reset().play();
+    next.add(index);
+    activeAnimationIndices.value = next;
     isAnimationPlaying.value = true;
   }
 
   function toggleAnimationPlayback() {
-    if (!mixer || animationClips.value.length === 0) {
+    if (
+      !mixer ||
+      animationClips.value.length === 0 ||
+      activeAnimationIndices.value.size === 0
+    ) {
       return;
     }
 
@@ -1054,12 +1085,19 @@ export function useGlbViewer() {
       const nextClips = [...importedAnimationClips.value, clip];
       animationClips.value = nextClips;
       rotorAnimationClip.value = clip;
-      activeAnimationIndex.value = nextClips.length - 1;
-      mixer = new THREE.AnimationMixer(modelRoot);
+      const rotorIndex = nextClips.length - 1;
+
+      if (!mixer) {
+        mixer = new THREE.AnimationMixer(modelRoot);
+      }
 
       const action = mixer.clipAction(clip);
       action.setLoop(THREE.LoopRepeat, Infinity);
       action.play();
+      activeAnimationIndices.value = new Set([
+        ...activeAnimationIndices.value,
+        rotorIndex,
+      ]);
       isAnimationPlaying.value = true;
       rotorAnimationApplied.value = true;
 
@@ -1103,27 +1141,24 @@ export function useGlbViewer() {
       }
       sessionRotorPivots = [];
 
+      const removedRotorIndex = animationClips.value.length - 1;
       const remainingClips = [...importedAnimationClips.value];
       animationClips.value = remainingClips;
       rotorAnimationClip.value = null;
       rotorAnimationApplied.value = false;
 
-      mixer?.stopAllAction();
-      if (remainingClips.length > 0) {
-        mixer = new THREE.AnimationMixer(modelRoot);
-        const nextIndex = Math.min(
-          activeAnimationIndex.value,
-          remainingClips.length - 1,
-        );
-        activeAnimationIndex.value = nextIndex;
-        const nextClip = remainingClips[nextIndex];
-        if (nextClip) {
-          mixer.clipAction(nextClip).reset().play();
-          isAnimationPlaying.value = true;
-        }
-      } else {
+      if (mixer && rotorClip) {
+        mixer.clipAction(rotorClip).stop();
+      }
+
+      const nextActive = new Set(activeAnimationIndices.value);
+      nextActive.delete(removedRotorIndex);
+      activeAnimationIndices.value = nextActive;
+
+      if (remainingClips.length === 0) {
         mixer = null;
-        activeAnimationIndex.value = 0;
+        isAnimationPlaying.value = false;
+      } else if (nextActive.size === 0) {
         isAnimationPlaying.value = false;
       }
 
@@ -1767,7 +1802,7 @@ export function useGlbViewer() {
     wireframeVisible,
     backgroundMode,
     isAnimationPlaying,
-    activeAnimationIndex,
+    activeAnimationIndices,
     stats,
     sceneNodes,
     expandedNodeIds,

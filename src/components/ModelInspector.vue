@@ -22,7 +22,7 @@ const props = defineProps<{
   selectedNodeDetails: SelectedNodeDetails | null;
   stats: ModelStats | null;
   isAnimationPlaying: boolean;
-  activeAnimationIndex: number;
+  activeAnimationIndices: ReadonlySet<number>;
   rotorTargetConfigList: Array<{
     nodeId: string;
     nodeName: string;
@@ -475,7 +475,7 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
             v-for="(animation, index) in stats.animations"
             :key="`${animation.name}-${index}`"
             type="button"
-            :class="{ active: activeAnimationIndex === index }"
+            :class="{ active: activeAnimationIndices.has(index) }"
             @click="emit('play-animation', index)"
           >
             <span>{{ animation.name }}</span>
