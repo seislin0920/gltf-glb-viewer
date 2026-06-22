@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "release:patch": "pnpm version patch && git push origin main --follow-tags",
+    "release:minor": "pnpm version minor && git push origin main --follow-tags",
+    "release:major": "pnpm version major && git push origin main --follow-tags"
   },
   "dependencies": {
     "primeicons": "^7.0.0",

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const appVersion = __APP_VERSION__
+
 const emit = defineEmits<{
   'pick-files': []
 }>()
@@ -10,7 +12,7 @@ const emit = defineEmits<{
       <span class="brand-mark">3D</span>
       <div class="brand-copy">
         <h1>GLB / GLTF 檢視器</h1>
-        <p>本機檔案直接檢視，不上傳模型資料。</p>
+        <p>本機檔案直接檢視，不上傳模型資料。v{{ appVersion }}</p>
       </div>
     </div>
 
