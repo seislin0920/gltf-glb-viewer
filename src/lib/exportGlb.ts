@@ -3,6 +3,7 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import {
   resolveRotorAnimationTrackNode,
 } from "./addRotorAnimation";
+import { withGlassMaterialsFixed } from "./fixGlassMaterialsForExport";
 import { isMesh, toMaterialArray } from "./modelUtils";
 import type { AnimationClipSettings } from "../types/glb-viewer";
 
@@ -243,18 +244,20 @@ export async function exportObjectAsGlb(options: {
         animations,
         runtimeAnimations,
         async () => {
-        const exporter = new GLTFExporter();
-        const result = await exporter.parseAsync(root, {
-          binary: true,
-          animations,
-          embedImages: true,
-          onlyVisible: false,
-        });
+          await withGlassMaterialsFixed(root, async () => {
+            const exporter = new GLTFExporter();
+            const result = await exporter.parseAsync(root, {
+              binary: true,
+              animations,
+              embedImages: true,
+              onlyVisible: false,
+            });
 
-        const blob = new Blob([result as ArrayBuffer], {
-          type: "model/gltf-binary",
-        });
-        downloadBlob(blob, fileName);
+            const blob = new Blob([result as ArrayBuffer], {
+              type: "model/gltf-binary",
+            });
+            downloadBlob(blob, fileName);
+          });
         },
       );
     });
