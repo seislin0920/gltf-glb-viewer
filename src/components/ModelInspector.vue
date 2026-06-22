@@ -63,6 +63,10 @@ const nodeColorHex = defineModel<string>("nodeColorHex", {
 
 const collapsed = defineModel<boolean>("collapsed", { default: false });
 
+const exportFileName = defineModel<string>("exportFileName", {
+  required: true,
+});
+
 const emit = defineEmits<{
   "toggle-animation-playback": [];
   "select-animation": [index: number];
@@ -558,6 +562,17 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
           將目前場景中的位置、旋轉與縮放變換寫入 GLB 並下載。
         </p>
         <div class="export-actions">
+          <label class="export-file-field">
+            <span>檔名</span>
+            <input
+              v-model="exportFileName"
+              class="export-file-input"
+              type="text"
+              :disabled="exporting || loading"
+              aria-label="匯出檔名"
+              placeholder="model_exported.glb"
+            />
+          </label>
           <button
             class="export-button"
             type="button"
@@ -740,7 +755,23 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
 }
 
 .export-actions {
-  @apply px-3 pb-3;
+  @apply flex flex-col gap-2 px-3 pb-3;
+}
+
+.export-file-field {
+  @apply flex min-w-0 flex-col gap-1 text-xs text-text-muted;
+}
+
+.export-file-field span {
+  @apply font-bold uppercase;
+}
+
+.export-file-input {
+  @apply min-h-[30px] w-full min-w-0 rounded-small border border-line-strong bg-surface px-2 py-1 text-sm text-text;
+}
+
+.export-file-input:disabled {
+  @apply cursor-not-allowed opacity-60;
 }
 
 .export-button {

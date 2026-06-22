@@ -39,6 +39,7 @@ const {
   selectedNodeRotation,
   rotorTargetConfigList,
   rotorAnimationName,
+  exportFileName,
   canApplyRotorAnimation,
   applyingRotorAnimation,
   applyingRotorAnimationChanges,
@@ -178,6 +179,7 @@ onMounted(async () => {
         :selected-animation-index="selectedAnimationIndex"
         :selected-animation-detail="selectedAnimationDetail"
         v-model:rotor-animation-name="rotorAnimationName"
+        v-model:export-file-name="exportFileName"
         :rotor-target-config-list="rotorTargetConfigList"
         :can-apply-rotor-animation="canApplyRotorAnimation"
         :applying-rotor-animation="applyingRotorAnimation"

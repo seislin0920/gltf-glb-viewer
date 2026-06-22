@@ -24,6 +24,7 @@ import {
 import { SpecularGlossinessCompatibilityPlugin } from "../lib/specularGlossinessPlugin";
 import {
   deriveExportedFileName,
+  normalizeExportFileName,
   exportObjectAsGlb,
   prepareAnimationClipsForExport,
 } from "../lib/exportGlb";
@@ -124,6 +125,7 @@ export function useGlbViewer() {
   const selectedNodeIds = ref<Set<string>>(new Set());
   const rotorTargetConfigs = ref<Record<string, RotorTargetConfig>>({});
   const rotorAnimationName = ref(DEFAULT_ANIMATION_NAME);
+  const exportFileName = ref("");
   const hasImportedAnimations = ref(false);
   const applyingRotorAnimation = ref(false);
   const applyingRotorAnimationChanges = ref(false);
@@ -697,7 +699,7 @@ export function useGlbViewer() {
         runtimeAnimations,
         mixer,
         originOffset: modelOriginOffset,
-        fileName: deriveExportedFileName(sourceFileName),
+        fileName: normalizeExportFileName(exportFileName.value, sourceFileName),
         wireframeEnabled: wireframeVisible.value,
       });
     } catch (error) {
@@ -844,6 +846,7 @@ export function useGlbViewer() {
       files,
       originalSize,
     );
+    exportFileName.value = deriveExportedFileName(primaryFile.name);
   }
 
   function disposeCurrentModel() {
@@ -868,6 +871,7 @@ export function useGlbViewer() {
       hasImportedAnimations.value = false;
       clearNodeColorBatches();
       stats.value = null;
+      exportFileName.value = "";
       return;
     }
 
@@ -915,6 +919,7 @@ export function useGlbViewer() {
     modelLoaded.value = false;
     hasImportedAnimations.value = false;
     stats.value = null;
+    exportFileName.value = "";
   }
 
   function resetCamera() {
@@ -2185,6 +2190,7 @@ export function useGlbViewer() {
     rotorTargetConfigs,
     rotorTargetConfigList,
     rotorAnimationName,
+    exportFileName,
     hasImportedAnimations,
     hasExistingAnimations,
     canApplyRotorAnimation,

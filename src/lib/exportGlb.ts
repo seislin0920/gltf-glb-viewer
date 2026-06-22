@@ -12,6 +12,26 @@ export function deriveExportedFileName(sourceFileName: string) {
   return `${base}_exported.glb`;
 }
 
+const INVALID_FILE_NAME_CHARS = /[<>:"/\\|?*\x00-\x1f]/g;
+
+export function normalizeExportFileName(
+  input: string,
+  fallbackSourceFileName: string,
+) {
+  let name = input.trim().replace(/^.*[/\\]/, "").replace(INVALID_FILE_NAME_CHARS, "_");
+
+  if (!name) {
+    return deriveExportedFileName(fallbackSourceFileName);
+  }
+
+  const base = name.replace(/\.(glb|gltf)$/i, "");
+  if (!base) {
+    return deriveExportedFileName(fallbackSourceFileName);
+  }
+
+  return `${base}.glb`;
+}
+
 interface MixerSnapshot {
   clip: THREE.AnimationClip;
   time: number;
