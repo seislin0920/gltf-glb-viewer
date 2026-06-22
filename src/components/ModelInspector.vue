@@ -28,7 +28,6 @@ const props = defineProps<{
     nodeName: string;
     config: RotorTargetConfig;
   }>;
-  hasImportedAnimations: boolean;
   rotorAnimationApplied: boolean;
   canApplyRotorAnimation: boolean;
   applyingRotorAnimation: boolean;
@@ -448,7 +447,6 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
       <RotorAnimationPanel
         v-model:animation-name="rotorAnimationName"
         :targets="rotorTargetConfigList"
-        :has-imported-animations="hasImportedAnimations"
         :rotor-animation-applied="rotorAnimationApplied"
         :can-apply-rotor-animation="canApplyRotorAnimation"
         :applying="applyingRotorAnimation"

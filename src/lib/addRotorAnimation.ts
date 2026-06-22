@@ -6,6 +6,10 @@ export const DEFAULT_ANIMATION_NAME = "RotorSpin";
 export const DEFAULT_KEYFRAMES = 24;
 export const MIN_POINTS_REQUIRED = 16;
 export const AUTO_OUTLIER_RATIO = 0.15;
+export const ROTOR_PIVOT_NAME_PREFIX = "RotorPivot_";
+
+const ROTOR_PIVOT_USERDATA_KEY = "rotorPivot";
+const ROTOR_TARGET_UUID_USERDATA_KEY = "rotorTargetUuid";
 
 export type RotationTargetConfig = {
   name: string;
@@ -354,14 +358,50 @@ export function createDefaultRotorTargetConfig(nodeId: string): RotorTargetConfi
   };
 }
 
-function findExistingPivot(target: THREE.Object3D): THREE.Object3D | null {
-  const parent = target.parent;
-  if (!parent) {
+export function getRotorPivotName(target: THREE.Object3D): string {
+  return `${ROTOR_PIVOT_NAME_PREFIX}${target.uuid}`;
+}
+
+export function markRotorPivotNode(pivot: THREE.Object3D, target: THREE.Object3D) {
+  pivot.userData[ROTOR_PIVOT_USERDATA_KEY] = true;
+  pivot.userData[ROTOR_TARGET_UUID_USERDATA_KEY] = target.uuid;
+}
+
+export function resolveRotorAnimationTrackNode(
+  root: THREE.Object3D,
+  trackNodeName: string,
+): THREE.Object3D | null {
+  const byName = root.getObjectByName(trackNodeName);
+  if (byName) {
+    return byName;
+  }
+
+  if (!trackNodeName.startsWith(ROTOR_PIVOT_NAME_PREFIX)) {
     return null;
   }
 
-  const pivotName = `${target.name}_Pivot`;
-  return parent.children.find((child) => child.name === pivotName) ?? null;
+  const targetUuid = trackNodeName.slice(ROTOR_PIVOT_NAME_PREFIX.length);
+  let resolved: THREE.Object3D | null = null;
+
+  root.traverse((object) => {
+    if (
+      object.userData[ROTOR_PIVOT_USERDATA_KEY] === true &&
+      object.userData[ROTOR_TARGET_UUID_USERDATA_KEY] === targetUuid
+    ) {
+      resolved = object;
+    }
+  });
+
+  return resolved;
+}
+
+function findExistingPivot(target: THREE.Object3D): THREE.Object3D | null {
+  const parent = target.parent;
+  if (parent && isRotorPivotNode(parent)) {
+    return parent;
+  }
+
+  return null;
 }
 
 const _worldBefore = new THREE.Matrix4();
@@ -391,7 +431,8 @@ export function createPivotForTarget(
   const localScale = target.scale.clone();
 
   const pivot = new THREE.Object3D();
-  pivot.name = `${target.name}_Pivot`;
+  pivot.name = getRotorPivotName(target);
+  markRotorPivotNode(pivot, target);
   pivot.position.copy(pivotLocal);
   pivot.quaternion.set(0, 0, 0, 1);
   pivot.scale.set(1, 1, 1);
@@ -429,6 +470,11 @@ function restorePivotWithWorldMatrix(
 }
 
 export function isRotorPivotNode(object: THREE.Object3D) {
+  if (object.userData[ROTOR_PIVOT_USERDATA_KEY] === true) {
+    return true;
+  }
+
+  // 相容舊版以節點名稱結尾 `_Pivot` 建立的 pivot。
   return object.name.endsWith("_Pivot");
 }
 
@@ -490,7 +536,7 @@ export function resetRotorPivotsToBindPose(
       }
 
       const nodeName = track.name.slice(0, -".quaternion".length);
-      const node = root.getObjectByName(nodeName);
+      const node = resolveRotorAnimationTrackNode(root, nodeName);
 
       if (!node) {
         continue;
@@ -573,12 +619,13 @@ export function addRotorAnimationBatch(
   animationName = DEFAULT_ANIMATION_NAME,
 ): RotorAnimationBatchResult {
   const tracks: THREE.KeyframeTrack[] = [];
-  const pivots: THREE.Object3D[] = [];
   let maxDuration = 0;
+
+  const pivotsByUuid = new Map<string, THREE.Object3D>();
 
   for (const { object, config } of targets) {
     const { pivot, clip } = addRotationAnimationToNode(object, config, animationName);
-    pivots.push(pivot);
+    pivotsByUuid.set(pivot.uuid, pivot);
     maxDuration = Math.max(maxDuration, clip.duration);
 
     for (const track of clip.tracks) {
@@ -587,5 +634,5 @@ export function addRotorAnimationBatch(
   }
 
   const clip = new THREE.AnimationClip(animationName, maxDuration, tracks);
-  return { clip, pivots };
+  return { clip, pivots: [...pivotsByUuid.values()] };
 }

@@ -11,7 +11,6 @@ const { onScrubPointerDown } = useScrubInput();
 
 const props = defineProps<{
   targets: Array<{ nodeId: string; nodeName: string; config: RotorTargetConfig }>;
-  hasImportedAnimations: boolean;
   rotorAnimationApplied: boolean;
   canApplyRotorAnimation: boolean;
   applying: boolean;
@@ -118,11 +117,7 @@ function setNumber(
       </span>
     </div>
 
-    <p v-if="hasImportedAnimations" class="warn-message">
-      模型已有動畫，請重新載入後再套用旋翼動畫。
-    </p>
-
-    <div v-else-if="rotorAnimationApplied" class="applied-state">
+    <div v-if="rotorAnimationApplied" class="applied-state">
       <p class="muted">旋翼動畫已套用，可播放預覽或下載 GLB。</p>
       <button
         class="remove-button"
@@ -440,10 +435,6 @@ function setNumber(
 
 .target-count {
   @apply text-xs font-bold normal-case text-text-muted;
-}
-
-.warn-message {
-  @apply m-0 px-3 py-2.5 text-sm text-warn;
 }
 
 .applied-state {

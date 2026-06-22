@@ -264,12 +264,29 @@ export function getObjectType(object: THREE.Object3D) {
   return object.type || 'Object3D'
 }
 
+const ROTOR_PIVOT_DISPLAY_PREFIX = "RotorPivot_";
+
 export function getObjectName(
   object: THREE.Object3D,
   type: string,
   rootFallbackName: string,
   unnamedCounts: Map<string, number>,
 ) {
+  if (object.name.startsWith(ROTOR_PIVOT_DISPLAY_PREFIX)) {
+    const target = object.children[0];
+    const targetName = target?.name.trim();
+
+    if (targetName) {
+      return `${targetName}_Pivot`;
+    }
+
+    const id = object.name.slice(
+      ROTOR_PIVOT_DISPLAY_PREFIX.length,
+      ROTOR_PIVOT_DISPLAY_PREFIX.length + 8,
+    );
+    return `Pivot_${id}`;
+  }
+
   const rawName = object.name.trim()
 
   if (rawName) {

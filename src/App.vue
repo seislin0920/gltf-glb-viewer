@@ -38,7 +38,6 @@ const {
   rotorTargetConfigList,
   rotorAnimationName,
   rotorAnimationApplied,
-  hasImportedAnimations,
   canApplyRotorAnimation,
   applyingRotorAnimation,
   removingRotorAnimation,
@@ -171,7 +170,6 @@ onMounted(async () => {
         :active-animation-index="activeAnimationIndex"
         v-model:rotor-animation-name="rotorAnimationName"
         :rotor-target-config-list="rotorTargetConfigList"
-        :has-imported-animations="hasImportedAnimations"
         :rotor-animation-applied="rotorAnimationApplied"
         :can-apply-rotor-animation="canApplyRotorAnimation"
         :applying-rotor-animation="applyingRotorAnimation"

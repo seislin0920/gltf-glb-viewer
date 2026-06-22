@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import { isMesh, toMaterialArray } from "./modelUtils";
+import {
+  resolveRotorAnimationTrackNode,
+} from "./addRotorAnimation";
 
 export function deriveExportedFileName(sourceFileName: string) {
   const base = sourceFileName.replace(/\.(glb|gltf)$/i, "");
@@ -50,7 +52,7 @@ function resetMixerToBindPose(
       }
 
       const nodeName = track.name.slice(0, -".quaternion".length);
-      const node = root.getObjectByName(nodeName);
+      const node = resolveRotorAnimationTrackNode(root, nodeName);
 
       if (!node || track.values.length < 4) {
         continue;
