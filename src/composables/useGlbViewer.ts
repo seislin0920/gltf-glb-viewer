@@ -25,6 +25,7 @@ import { SpecularGlossinessCompatibilityPlugin } from "../lib/specularGlossiness
 import {
   deriveExportedFileName,
   exportObjectAsGlb,
+  prepareAnimationClipsForExport,
 } from "../lib/exportGlb";
 import {
   buildErrorMessage,
@@ -50,13 +51,13 @@ import {
 } from "../lib/modelUtils";
 import {
   addRotorAnimationBatch,
-  collectRotorPivotNodes,
   createDefaultRotorTargetConfig,
   DEFAULT_ANIMATION_NAME,
   estimatePivotAndAxis,
+  rebuildRotorAnimationClip,
+  removeRotorClipPivots,
   resolveTargetConfig,
   resetRotorPivotsToBindPose,
-  unwrapRotorPivot,
   validateRotorTarget,
 } from "../lib/addRotorAnimation";
 import {
@@ -67,14 +68,33 @@ import {
   type NodeColorBatch,
 } from "../lib/applyNodeColor";
 import type {
+  AnimationClipSettings,
+  AnimationLoopMode,
   BackgroundMode,
   ModelStats,
   NodeColorMode,
+  RotorClipRecord,
+  RotorClipTargetRecord,
   RotorTargetConfig,
   SceneNode,
+  SelectedAnimationDetail,
   SelectedNodeDetails,
   Vector3Values,
 } from "../types/glb-viewer";
+
+type StoredAnimationClipMeta = AnimationClipSettings & {
+  rotor?: RotorClipRecord;
+};
+
+function createDefaultClipMeta(
+  source: AnimationClipSettings["source"],
+): StoredAnimationClipMeta {
+  return {
+    source,
+    timeScale: 1,
+    loopMode: source === "rotor" ? "repeat" : "repeat",
+  };
+}
 
 export function useGlbViewer() {
   const canvasRef = shallowRef<HTMLCanvasElement | null>(null);
@@ -93,6 +113,8 @@ export function useGlbViewer() {
   const backgroundMode = ref<BackgroundMode>("studio");
   const isAnimationPlaying = ref(false);
   const activeAnimationIndices = ref<Set<number>>(new Set());
+  const selectedAnimationIndex = ref<number | null>(null);
+  const animationClipMeta = ref<Map<string, StoredAnimationClipMeta>>(new Map());
   const stats = ref<ModelStats | null>(null);
   const animationClips = ref<THREE.AnimationClip[]>([]);
   const importedAnimationClips = ref<THREE.AnimationClip[]>([]);
@@ -102,11 +124,10 @@ export function useGlbViewer() {
   const selectedNodeIds = ref<Set<string>>(new Set());
   const rotorTargetConfigs = ref<Record<string, RotorTargetConfig>>({});
   const rotorAnimationName = ref(DEFAULT_ANIMATION_NAME);
-  const rotorAnimationApplied = ref(false);
-  const rotorAnimationClip = ref<THREE.AnimationClip | null>(null);
   const hasImportedAnimations = ref(false);
   const applyingRotorAnimation = ref(false);
-  const removingRotorAnimation = ref(false);
+  const applyingRotorAnimationChanges = ref(false);
+  const removingAnimation = ref(false);
   const nodeColorMode = ref<NodeColorMode>("color");
   const nodeColorHex = ref("#000000");
   const nodeColorTextureFile = ref<File | null>(null);
@@ -176,10 +197,40 @@ export function useGlbViewer() {
       },
     };
   });
-  const hasExistingAnimations = computed(
-    () => hasImportedAnimations.value || rotorAnimationApplied.value,
+  const hasExistingAnimations = computed(() => animationClips.value.length > 0);
+  const canApplyRotorAnimation = computed(
+    () => selectedNodeIds.value.size > 0 && !applyingRotorAnimation.value,
   );
-  const canApplyRotorAnimation = computed(() => !rotorAnimationApplied.value);
+  const selectedAnimationDetail = computed<SelectedAnimationDetail | null>(() => {
+    const index = selectedAnimationIndex.value;
+    if (index === null) {
+      return null;
+    }
+
+    const clip = animationClips.value[index];
+    if (!clip) {
+      return null;
+    }
+
+    const meta =
+      animationClipMeta.value.get(clip.uuid) ?? createDefaultClipMeta("imported");
+
+    return {
+      index,
+      name: clip.name || `Animation ${index + 1}`,
+      duration: clip.duration,
+      source: meta.source,
+      timeScale: meta.timeScale,
+      loopMode: meta.loopMode,
+      rotorTargets:
+        meta.rotor?.targets.map((target) => ({
+          nodeId: target.nodeId,
+          nodeName: sceneNodeById.value.get(target.nodeId)?.name ?? target.nodeId,
+          pivotUuid: target.pivotUuid,
+          config: target.config,
+        })) ?? [],
+    };
+  });
   const rotorTargetConfigList = computed(() =>
     Array.from(selectedNodeIds.value).map((nodeId) => ({
       nodeId,
@@ -230,7 +281,6 @@ export function useGlbViewer() {
   let initialModelPosition: THREE.Vector3 | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let modelRoot: THREE.Object3D | null = null;
-  let sessionRotorPivots: THREE.Object3D[] = [];
   let axesHelper: THREE.Group | null = null;
   let gridHelper: THREE.GridHelper | null = null;
   let mixer: THREE.AnimationMixer | null = null;
@@ -624,10 +674,27 @@ export function useGlbViewer() {
     errorMessage.value = "";
 
     try {
+      syncRotorClipsFromMeta();
+      const runtimeAnimations = animationClips.value;
+      const metaForExport = new Map(
+        [...animationClipMeta.value.entries()].map(([uuid, meta]) => [
+          uuid,
+          {
+            source: meta.source,
+            timeScale: meta.timeScale,
+            loopMode: meta.loopMode,
+          },
+        ]),
+      );
+      const exportAnimations = prepareAnimationClipsForExport(
+        runtimeAnimations,
+        metaForExport,
+      );
       const sourceFileName = stats.value?.fileName ?? "model.glb";
       await exportObjectAsGlb({
         root: modelRoot,
-        animations: animationClips.value,
+        animations: exportAnimations,
+        runtimeAnimations,
         mixer,
         originOffset: modelOriginOffset,
         fileName: deriveExportedFileName(sourceFileName),
@@ -725,13 +792,16 @@ export function useGlbViewer() {
     modelOriginOffset.copy(originalCenter);
     modelLoaded.value = true;
     hasImportedAnimations.value = gltf.animations.length > 0;
-    rotorAnimationApplied.value = false;
-    rotorAnimationClip.value = null;
-    sessionRotorPivots = [];
     importedAnimationClips.value = gltf.animations;
     animationClips.value = [...gltf.animations];
     activeAnimationIndices.value =
       gltf.animations.length > 0 ? new Set([0]) : new Set();
+    selectedAnimationIndex.value = gltf.animations.length > 0 ? 0 : null;
+    const nextMeta = new Map<string, StoredAnimationClipMeta>();
+    for (const clip of gltf.animations) {
+      nextMeta.set(clip.uuid, createDefaultClipMeta("imported"));
+    }
+    animationClipMeta.value = nextMeta;
     mixer = gltf.animations.length > 0 ? new THREE.AnimationMixer(root) : null;
 
     buildSceneTree(root, primaryFile.name);
@@ -760,7 +830,11 @@ export function useGlbViewer() {
     applyMoveModeAttachment();
 
     if (mixer && gltf.animations[0]) {
-      mixer.clipAction(gltf.animations[0]).reset().play();
+      const action = mixer.clipAction(gltf.animations[0]).reset().play();
+      const meta = nextMeta.get(gltf.animations[0].uuid);
+      if (meta) {
+        applyClipActionSettings(action, meta);
+      }
     }
 
     stats.value = analyzeModel(
@@ -780,18 +854,18 @@ export function useGlbViewer() {
     modelPosition.value = { x: 0, y: 0, z: 0 };
     initialModelPosition = null;
     modelOriginOffset.set(0, 0, 0);
-    sessionRotorPivots = [];
 
     if (!scene || !modelRoot) {
       modelRoot = null;
       mixer = null;
       animationClips.value = [];
       importedAnimationClips.value = [];
+      animationClipMeta.value = new Map();
+      activeAnimationIndices.value = new Set();
+      selectedAnimationIndex.value = null;
       isAnimationPlaying.value = false;
       modelLoaded.value = false;
       hasImportedAnimations.value = false;
-      rotorAnimationApplied.value = false;
-      rotorAnimationClip.value = null;
       clearNodeColorBatches();
       stats.value = null;
       return;
@@ -834,11 +908,12 @@ export function useGlbViewer() {
     mixer = null;
     animationClips.value = [];
     importedAnimationClips.value = [];
+    animationClipMeta.value = new Map();
+    activeAnimationIndices.value = new Set();
+    selectedAnimationIndex.value = null;
     isAnimationPlaying.value = false;
     modelLoaded.value = false;
     hasImportedAnimations.value = false;
-    rotorAnimationApplied.value = false;
-    rotorAnimationClip.value = null;
     stats.value = null;
   }
 
@@ -869,6 +944,77 @@ export function useGlbViewer() {
   function setBackgroundMode(mode: BackgroundMode) {
     backgroundMode.value = mode;
     applySceneBackground();
+  }
+
+  function getClipMeta(clip: THREE.AnimationClip): StoredAnimationClipMeta {
+    return (
+      animationClipMeta.value.get(clip.uuid) ?? createDefaultClipMeta("imported")
+    );
+  }
+
+  function setClipMeta(clip: THREE.AnimationClip, meta: StoredAnimationClipMeta) {
+    const next = new Map(animationClipMeta.value);
+    next.set(clip.uuid, meta);
+    animationClipMeta.value = next;
+  }
+
+  function applyClipActionSettings(
+    action: THREE.AnimationAction,
+    meta: AnimationClipSettings,
+  ) {
+    action.timeScale = meta.timeScale;
+
+    if (meta.loopMode === "once") {
+      action.setLoop(THREE.LoopOnce, 1);
+    } else if (meta.loopMode === "pingpong") {
+      action.setLoop(THREE.LoopPingPong, Infinity);
+    } else {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+    }
+  }
+
+  function syncAnimationStats() {
+    if (!stats.value) {
+      return;
+    }
+
+    stats.value = {
+      ...stats.value,
+      animations: animationClips.value.map((item, index) => ({
+        name: item.name || `Animation ${index + 1}`,
+        duration: `${formatDecimal(item.duration)} 秒`,
+      })),
+    };
+  }
+
+  function reindexAnimationState(removedIndex: number) {
+    const nextActive = new Set<number>();
+    for (const index of activeAnimationIndices.value) {
+      if (index === removedIndex) {
+        continue;
+      }
+      nextActive.add(index > removedIndex ? index - 1 : index);
+    }
+    activeAnimationIndices.value = nextActive;
+
+    const selected = selectedAnimationIndex.value;
+    if (selected === null) {
+      return;
+    }
+    if (selected === removedIndex) {
+      selectedAnimationIndex.value = null;
+      return;
+    }
+    if (selected > removedIndex) {
+      selectedAnimationIndex.value = selected - 1;
+    }
+  }
+
+  function selectAnimation(index: number) {
+    if (!animationClips.value[index]) {
+      return;
+    }
+    selectedAnimationIndex.value = index;
   }
 
   function stopAnimationAction(index: number) {
@@ -902,7 +1048,8 @@ export function useGlbViewer() {
       return;
     }
 
-    mixer.clipAction(clip).reset().play();
+    const action = mixer.clipAction(clip).reset().play();
+    applyClipActionSettings(action, getClipMeta(clip));
     next.add(index);
     activeAnimationIndices.value = next;
     isAnimationPlaying.value = true;
@@ -918,6 +1065,290 @@ export function useGlbViewer() {
     }
 
     isAnimationPlaying.value = !isAnimationPlaying.value;
+  }
+
+  function replaceAnimationClipAtIndex(
+    index: number,
+    nextClip: THREE.AnimationClip,
+    meta: StoredAnimationClipMeta,
+  ) {
+    const oldClip = animationClips.value[index];
+    if (!oldClip) {
+      return;
+    }
+
+    const oldUuid = oldClip.uuid;
+    const wasPlaying = activeAnimationIndices.value.has(index);
+
+    if (mixer) {
+      mixer.clipAction(oldClip).stop();
+    }
+
+    const nextClips = [...animationClips.value];
+    nextClips[index] = nextClip;
+    animationClips.value = nextClips;
+
+    const nextMeta = new Map(animationClipMeta.value);
+    nextMeta.delete(oldUuid);
+    nextMeta.set(nextClip.uuid, meta);
+    animationClipMeta.value = nextMeta;
+
+    if (mixer && wasPlaying) {
+      const action = mixer.clipAction(nextClip).reset().play();
+      applyClipActionSettings(action, meta);
+    }
+  }
+
+  function syncRotorClipsFromMeta() {
+    if (!modelRoot) {
+      return;
+    }
+
+    for (let index = 0; index < animationClips.value.length; index += 1) {
+      const clip = animationClips.value[index];
+      if (!clip) {
+        continue;
+      }
+
+      const meta = getClipMeta(clip);
+      if (meta.source !== "rotor" || !meta.rotor) {
+        continue;
+      }
+
+      for (const target of meta.rotor.targets) {
+        const object = objectByNodeId.get(target.nodeId);
+        if (!object) {
+          throw new Error(`找不到節點：${target.nodeId}`);
+        }
+        validateRotorTarget(object, target.config);
+      }
+
+      const wasPlaying = activeAnimationIndices.value.has(index);
+      if (wasPlaying) {
+        resetRotorPivotsToBindPose(modelRoot, [clip]);
+      }
+
+      const nextClip = rebuildRotorAnimationClip(
+        modelRoot,
+        meta.rotor,
+        clip.name || DEFAULT_ANIMATION_NAME,
+      );
+      replaceAnimationClipAtIndex(index, nextClip, meta);
+    }
+
+    syncAnimationStats();
+  }
+
+  function updateAnimationSettings(
+    index: number,
+    patch: {
+      name?: string;
+      timeScale?: number;
+      loopMode?: AnimationLoopMode;
+    },
+  ) {
+    const clip = animationClips.value[index];
+    if (!clip) {
+      return;
+    }
+
+    const meta = { ...getClipMeta(clip) };
+
+    if (patch.name !== undefined) {
+      clip.name = patch.name.trim() || clip.name;
+    }
+    if (patch.timeScale !== undefined) {
+      meta.timeScale = Math.min(10, Math.max(0.1, patch.timeScale));
+    }
+    if (patch.loopMode !== undefined) {
+      meta.loopMode = patch.loopMode;
+    }
+
+    setClipMeta(clip, meta);
+
+    if (mixer && activeAnimationIndices.value.has(index)) {
+      applyClipActionSettings(mixer.clipAction(clip), meta);
+    }
+
+    syncAnimationStats();
+  }
+
+  function updateRotorAnimationTarget(
+    index: number,
+    pivotUuid: string,
+    patch: Partial<RotorTargetConfig>,
+  ) {
+    const clip = animationClips.value[index];
+    if (!clip) {
+      return;
+    }
+
+    const meta = getClipMeta(clip);
+    if (!meta.rotor) {
+      return;
+    }
+
+    const nextTargets = meta.rotor.targets.map((target) => {
+      if (target.pivotUuid !== pivotUuid) {
+        return target;
+      }
+
+      return {
+        ...target,
+        config: { ...target.config, ...patch, nodeId: target.config.nodeId },
+      };
+    });
+
+    setClipMeta(clip, {
+      ...meta,
+      rotor: { targets: nextTargets },
+    });
+  }
+
+  function detectRotorAnimationTarget(
+    index: number,
+    pivotUuid: string,
+    kind: "pivot" | "axis" | "both" = "both",
+  ) {
+    try {
+      const clip = animationClips.value[index];
+      if (!clip) {
+        return;
+      }
+
+      const meta = getClipMeta(clip);
+      const target = meta.rotor?.targets.find((item) => item.pivotUuid === pivotUuid);
+      if (!target) {
+        return;
+      }
+
+      const object = objectByNodeId.get(target.nodeId);
+      if (!object) {
+        throw new Error("找不到節點");
+      }
+
+      const result = estimatePivotAndAxis(object);
+      const patch: Partial<RotorTargetConfig> = {};
+
+      if (kind === "pivot" || kind === "both") {
+        patch.pivot = result.pivot;
+      }
+      if (kind === "axis" || kind === "both") {
+        patch.axis = result.axis;
+      }
+
+      updateRotorAnimationTarget(index, pivotUuid, patch);
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "偵測旋翼參數失敗。";
+    }
+  }
+
+  function applyRotorAnimationChanges(index: number) {
+    if (!modelRoot || applyingRotorAnimationChanges.value) {
+      return;
+    }
+
+    const clip = animationClips.value[index];
+    if (!clip) {
+      return;
+    }
+
+    const meta = getClipMeta(clip);
+    if (!meta.rotor) {
+      return;
+    }
+
+    applyingRotorAnimationChanges.value = true;
+    errorMessage.value = "";
+
+    try {
+      for (const target of meta.rotor.targets) {
+        const object = objectByNodeId.get(target.nodeId);
+        if (!object) {
+          throw new Error(`找不到節點：${target.nodeId}`);
+        }
+        validateRotorTarget(object, target.config);
+      }
+
+      const wasPlaying = activeAnimationIndices.value.has(index);
+      if (wasPlaying) {
+        resetRotorPivotsToBindPose(modelRoot, [clip]);
+      }
+
+      const nextClip = rebuildRotorAnimationClip(
+        modelRoot,
+        meta.rotor,
+        clip.name || DEFAULT_ANIMATION_NAME,
+      );
+
+      replaceAnimationClipAtIndex(index, nextClip, meta);
+      syncAnimationStats();
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "更新旋翼動畫失敗。";
+    } finally {
+      applyingRotorAnimationChanges.value = false;
+    }
+  }
+
+  function removeAnimation(index: number) {
+    if (!modelRoot || removingAnimation.value) {
+      return;
+    }
+
+    const clip = animationClips.value[index];
+    if (!clip) {
+      return;
+    }
+
+    removingAnimation.value = true;
+    errorMessage.value = "";
+
+    try {
+      const meta = animationClipMeta.value.get(clip.uuid);
+
+      if (meta?.source === "rotor" && meta.rotor) {
+        if (mixer) {
+          resetRotorPivotsToBindPose(modelRoot, [clip]);
+        }
+        removeRotorClipPivots(modelRoot, meta.rotor);
+      }
+
+      if (mixer) {
+        mixer.clipAction(clip).stop();
+      }
+
+      animationClips.value = animationClips.value.filter((_, clipIndex) => clipIndex !== index);
+
+      if (meta?.source === "imported") {
+        importedAnimationClips.value = importedAnimationClips.value.filter(
+          (item) => item.uuid !== clip.uuid,
+        );
+        hasImportedAnimations.value = importedAnimationClips.value.length > 0;
+      }
+
+      const nextMeta = new Map(animationClipMeta.value);
+      nextMeta.delete(clip.uuid);
+      animationClipMeta.value = nextMeta;
+
+      reindexAnimationState(index);
+
+      if (animationClips.value.length === 0) {
+        mixer = null;
+        isAnimationPlaying.value = false;
+      } else if (activeAnimationIndices.value.size === 0) {
+        isAnimationPlaying.value = false;
+      }
+
+      rebuildSceneTreePreservingSelection();
+      syncAnimationStats();
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "移除動畫失敗。";
+    } finally {
+      removingAnimation.value = false;
+    }
   }
 
   function syncRotorConfigsFromSelection() {
@@ -1040,11 +1471,6 @@ export function useGlbViewer() {
       return;
     }
 
-    if (rotorAnimationApplied.value) {
-      errorMessage.value = "請先移除已套用的旋翼動畫。";
-      return;
-    }
-
     if (selectedNodeIds.value.size === 0) {
       errorMessage.value = "請至少選取一個節點。";
       return;
@@ -1055,6 +1481,7 @@ export function useGlbViewer() {
 
     try {
       const resolvedTargets = [];
+      const resolvedNodeIds: string[] = [];
 
       for (const nodeId of selectedNodeIds.value) {
         const object = objectByNodeId.get(nodeId);
@@ -1069,116 +1496,61 @@ export function useGlbViewer() {
         validateRotorTarget(object, input);
         const config = resolveTargetConfig(object, input);
         resolvedTargets.push({ object, config });
+        resolvedNodeIds.push(nodeId);
       }
 
-      const preExistingPivots = new Set(collectRotorPivotNodes(modelRoot));
-
+      const animationName =
+        rotorAnimationName.value.trim() || DEFAULT_ANIMATION_NAME;
       const { clip, pivots } = addRotorAnimationBatch(
         resolvedTargets,
-        rotorAnimationName.value.trim() || DEFAULT_ANIMATION_NAME,
+        animationName,
       );
 
-      sessionRotorPivots = pivots.filter(
-        (pivot) => !preExistingPivots.has(pivot),
+      const targetRecords: RotorClipTargetRecord[] = resolvedTargets.map(
+        ({ object }, index) => {
+          const nodeId = resolvedNodeIds[index]!;
+          return {
+            nodeId,
+            objectUuid: object.uuid,
+            pivotUuid: pivots[index]!.uuid,
+            config: {
+              ...(rotorTargetConfigs.value[nodeId] ??
+                createDefaultRotorTargetConfig(nodeId)),
+              nodeId,
+            },
+          };
+        },
       );
 
-      const nextClips = [...importedAnimationClips.value, clip];
+      const nextClips = [...animationClips.value, clip];
       animationClips.value = nextClips;
-      rotorAnimationClip.value = clip;
       const rotorIndex = nextClips.length - 1;
+
+      setClipMeta(clip, {
+        ...createDefaultClipMeta("rotor"),
+        rotor: { targets: targetRecords },
+      });
 
       if (!mixer) {
         mixer = new THREE.AnimationMixer(modelRoot);
       }
 
-      const action = mixer.clipAction(clip);
-      action.setLoop(THREE.LoopRepeat, Infinity);
-      action.play();
+      const action = mixer.clipAction(clip).reset().play();
+      applyClipActionSettings(action, getClipMeta(clip));
       activeAnimationIndices.value = new Set([
         ...activeAnimationIndices.value,
         rotorIndex,
       ]);
+      selectedAnimationIndex.value = rotorIndex;
       isAnimationPlaying.value = true;
-      rotorAnimationApplied.value = true;
 
       rebuildSceneTreePreservingSelection();
-
-      if (stats.value) {
-        stats.value = {
-          ...stats.value,
-          nodeCount: sceneNodes.value.length,
-          animations: animationClips.value.map((item, index) => ({
-            name: item.name || `Animation ${index + 1}`,
-            duration: `${formatDecimal(item.duration)} 秒`,
-          })),
-        };
-      }
+      syncAnimationStats();
     } catch (error) {
       errorMessage.value =
         error instanceof Error ? error.message : "套用旋翼動畫失敗。";
     } finally {
       applyingRotorAnimation.value = false;
-    }
-  }
-
-  function removeRotorAnimation() {
-    if (!modelRoot || !rotorAnimationApplied.value || removingRotorAnimation.value) {
-      return;
-    }
-
-    removingRotorAnimation.value = true;
-    errorMessage.value = "";
-
-    try {
-      const rotorClip = rotorAnimationClip.value;
-
-      if (mixer && rotorClip) {
-        resetRotorPivotsToBindPose(modelRoot, [rotorClip]);
-      }
-
-      for (const pivot of sessionRotorPivots) {
-        unwrapRotorPivot(pivot);
-      }
-      sessionRotorPivots = [];
-
-      const removedRotorIndex = animationClips.value.length - 1;
-      const remainingClips = [...importedAnimationClips.value];
-      animationClips.value = remainingClips;
-      rotorAnimationClip.value = null;
-      rotorAnimationApplied.value = false;
-
-      if (mixer && rotorClip) {
-        mixer.clipAction(rotorClip).stop();
-      }
-
-      const nextActive = new Set(activeAnimationIndices.value);
-      nextActive.delete(removedRotorIndex);
-      activeAnimationIndices.value = nextActive;
-
-      if (remainingClips.length === 0) {
-        mixer = null;
-        isAnimationPlaying.value = false;
-      } else if (nextActive.size === 0) {
-        isAnimationPlaying.value = false;
-      }
-
-      rebuildSceneTreePreservingSelection();
-
-      if (stats.value) {
-        stats.value = {
-          ...stats.value,
-          nodeCount: sceneNodes.value.length,
-          animations: animationClips.value.map((item, index) => ({
-            name: item.name || `Animation ${index + 1}`,
-            duration: `${formatDecimal(item.duration)} 秒`,
-          })),
-        };
-      }
-    } catch (error) {
-      errorMessage.value =
-        error instanceof Error ? error.message : "移除旋翼動畫失敗。";
-    } finally {
-      removingRotorAnimation.value = false;
     }
   }
 
@@ -1803,6 +2175,8 @@ export function useGlbViewer() {
     backgroundMode,
     isAnimationPlaying,
     activeAnimationIndices,
+    selectedAnimationIndex,
+    selectedAnimationDetail,
     stats,
     sceneNodes,
     expandedNodeIds,
@@ -1811,12 +2185,12 @@ export function useGlbViewer() {
     rotorTargetConfigs,
     rotorTargetConfigList,
     rotorAnimationName,
-    rotorAnimationApplied,
     hasImportedAnimations,
     hasExistingAnimations,
     canApplyRotorAnimation,
     applyingRotorAnimation,
-    removingRotorAnimation,
+    applyingRotorAnimationChanges,
+    removingAnimation,
     nodeColorMode,
     nodeColorHex,
     nodeColorTextureFile,
@@ -1850,7 +2224,13 @@ export function useGlbViewer() {
     toggleWireframe,
     setBackgroundMode,
     playAnimation,
+    selectAnimation,
     toggleAnimationPlayback,
+    updateAnimationSettings,
+    updateRotorAnimationTarget,
+    detectRotorAnimationTarget,
+    applyRotorAnimationChanges,
+    removeAnimation,
     toggleNodeExpansion,
     expandAllNodes,
     collapseAllNodes,
@@ -1859,7 +2239,6 @@ export function useGlbViewer() {
     updateRotorTargetConfig,
     detectRotorPivotAxis,
     applyRotorAnimation,
-    removeRotorAnimation,
     setNodeColorTextureFile,
     applyNodeColor,
     revertNodeColor,

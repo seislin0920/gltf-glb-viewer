@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { isMesh } from "./modelUtils";
-import type { RotorTargetConfig, Vector3Values } from "../types/glb-viewer";
+import type {
+  RotorClipRecord,
+  RotorTargetConfig,
+  Vector3Values,
+} from "../types/glb-viewer";
 
 export const DEFAULT_ANIMATION_NAME = "RotorSpin";
 export const DEFAULT_KEYFRAMES = 24;
@@ -635,4 +639,68 @@ export function addRotorAnimationBatch(
 
   const clip = new THREE.AnimationClip(animationName, maxDuration, tracks);
   return { clip, pivots: [...pivotsByUuid.values()] };
+}
+
+function findPivotByUuid(
+  root: THREE.Object3D,
+  pivotUuid: string,
+): THREE.Object3D | null {
+  let resolved: THREE.Object3D | null = null;
+
+  root.traverse((object) => {
+    if (object.uuid === pivotUuid && isRotorPivotNode(object)) {
+      resolved = object;
+    }
+  });
+
+  return resolved;
+}
+
+export function removeRotorClipPivots(
+  root: THREE.Object3D,
+  record: RotorClipRecord,
+) {
+  for (const target of record.targets) {
+    const pivot = findPivotByUuid(root, target.pivotUuid);
+    if (pivot) {
+      unwrapRotorPivot(pivot);
+    }
+  }
+}
+
+export function rebuildRotorAnimationClip(
+  root: THREE.Object3D,
+  record: RotorClipRecord,
+  animationName: string,
+): THREE.AnimationClip {
+  const tracks: THREE.KeyframeTrack[] = [];
+  let maxDuration = 0;
+
+  for (const target of record.targets) {
+    const pivot = findPivotByUuid(root, target.pivotUuid);
+    if (!pivot) {
+      continue;
+    }
+
+    let object: THREE.Object3D | null = null;
+    root.traverse((node) => {
+      if (node.uuid === target.objectUuid) {
+        object = node;
+      }
+    });
+
+    if (!object) {
+      continue;
+    }
+
+    const rotationConfig = resolveTargetConfig(object, target.config);
+    const clip = createRotationClipForPivot(pivot, rotationConfig, animationName);
+    maxDuration = Math.max(maxDuration, clip.duration);
+
+    for (const track of clip.tracks) {
+      tracks.push(track);
+    }
+  }
+
+  return new THREE.AnimationClip(animationName, maxDuration, tracks);
 }

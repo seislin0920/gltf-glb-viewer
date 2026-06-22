@@ -13,6 +13,40 @@ export interface AnimationInfo {
   duration: string
 }
 
+export type AnimationLoopMode = 'repeat' | 'once' | 'pingpong'
+
+export interface AnimationClipSettings {
+  source: 'imported' | 'rotor'
+  timeScale: number
+  loopMode: AnimationLoopMode
+}
+
+export interface RotorClipTargetRecord {
+  nodeId: string
+  objectUuid: string
+  pivotUuid: string
+  config: RotorTargetConfig
+}
+
+export interface RotorClipRecord {
+  targets: RotorClipTargetRecord[]
+}
+
+export interface SelectedAnimationDetail {
+  index: number
+  name: string
+  duration: number
+  source: AnimationClipSettings['source']
+  timeScale: number
+  loopMode: AnimationLoopMode
+  rotorTargets: Array<{
+    nodeId: string
+    nodeName: string
+    pivotUuid: string
+    config: RotorTargetConfig
+  }>
+}
+
 export interface ModelStats {
   fileName: string
   fileSize: string

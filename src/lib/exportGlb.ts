@@ -3,6 +3,8 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import {
   resolveRotorAnimationTrackNode,
 } from "./addRotorAnimation";
+import { isMesh, toMaterialArray } from "./modelUtils";
+import type { AnimationClipSettings } from "../types/glb-viewer";
 
 export function deriveExportedFileName(sourceFileName: string) {
   const base = sourceFileName.replace(/\.(glb|gltf)$/i, "");
@@ -91,21 +93,57 @@ function restoreMixer(mixer: THREE.AnimationMixer, snapshots: MixerSnapshot[]) {
 function withAnimationBindPose(
   root: THREE.Object3D,
   mixer: THREE.AnimationMixer | null | undefined,
-  animations: THREE.AnimationClip[],
+  exportAnimations: THREE.AnimationClip[],
+  runtimeAnimations: THREE.AnimationClip[],
   run: () => Promise<void>,
 ): Promise<void> {
-  if (!mixer || animations.length === 0) {
+  if (!mixer || exportAnimations.length === 0) {
     root.updateMatrixWorld(true);
     return run();
   }
 
-  const snapshots = snapshotMixer(mixer, animations);
-  resetMixerToBindPose(root, mixer, animations);
+  const snapshots = snapshotMixer(mixer, runtimeAnimations);
+  resetMixerToBindPose(root, mixer, exportAnimations);
 
   return run().finally(() => {
     restoreMixer(mixer, snapshots);
     root.updateMatrixWorld(true);
   });
+}
+
+export function cloneAnimationClipForExport(
+  clip: THREE.AnimationClip,
+  meta?: AnimationClipSettings,
+): THREE.AnimationClip {
+  const exportClip = clip.clone();
+  exportClip.name = clip.name;
+
+  const timeScale = meta?.timeScale ?? 1;
+  if (timeScale === 1) {
+    return exportClip;
+  }
+
+  const factor = 1 / timeScale;
+  exportClip.duration = clip.duration * factor;
+
+  for (const track of exportClip.tracks) {
+    const scaledTimes = track.times.slice();
+    for (let i = 0; i < scaledTimes.length; i += 1) {
+      scaledTimes[i] = scaledTimes[i]! * factor;
+    }
+    track.times = scaledTimes;
+  }
+
+  return exportClip;
+}
+
+export function prepareAnimationClipsForExport(
+  clips: THREE.AnimationClip[],
+  metaByUuid: Map<string, AnimationClipSettings>,
+): THREE.AnimationClip[] {
+  return clips.map((clip) =>
+    cloneAnimationClipForExport(clip, metaByUuid.get(clip.uuid)),
+  );
 }
 
 function withRootOriginOffset(
@@ -181,6 +219,7 @@ function withWireframeDisabled(
 export async function exportObjectAsGlb(options: {
   root: THREE.Object3D;
   animations?: THREE.AnimationClip[];
+  runtimeAnimations?: THREE.AnimationClip[];
   mixer?: THREE.AnimationMixer | null;
   originOffset?: THREE.Vector3 | null;
   fileName: string;
@@ -189,6 +228,7 @@ export async function exportObjectAsGlb(options: {
   const {
     root,
     animations = [],
+    runtimeAnimations = animations,
     mixer = null,
     originOffset = null,
     fileName,
@@ -197,7 +237,12 @@ export async function exportObjectAsGlb(options: {
 
   await withWireframeDisabled(root, wireframeEnabled, async () => {
     await withRootOriginOffset(root, originOffset, async () => {
-      await withAnimationBindPose(root, mixer, animations, async () => {
+      await withAnimationBindPose(
+        root,
+        mixer,
+        animations,
+        runtimeAnimations,
+        async () => {
         const exporter = new GLTFExporter();
         const result = await exporter.parseAsync(root, {
           binary: true,
@@ -210,7 +255,8 @@ export async function exportObjectAsGlb(options: {
           type: "model/gltf-binary",
         });
         downloadBlob(blob, fileName);
-      });
+        },
+      );
     });
   });
 }

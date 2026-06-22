@@ -24,6 +24,8 @@ const {
   backgroundMode,
   isAnimationPlaying,
   activeAnimationIndices,
+  selectedAnimationIndex,
+  selectedAnimationDetail,
   stats,
   sceneNodes,
   expandedNodeIds,
@@ -37,10 +39,10 @@ const {
   selectedNodeRotation,
   rotorTargetConfigList,
   rotorAnimationName,
-  rotorAnimationApplied,
   canApplyRotorAnimation,
   applyingRotorAnimation,
-  removingRotorAnimation,
+  applyingRotorAnimationChanges,
+  removingAnimation,
   nodeColorMode,
   nodeColorHex,
   nodeColorTextureFile,
@@ -68,7 +70,13 @@ const {
   toggleWireframe,
   setBackgroundMode,
   playAnimation,
+  selectAnimation,
   toggleAnimationPlayback,
+  updateAnimationSettings,
+  updateRotorAnimationTarget,
+  detectRotorAnimationTarget,
+  applyRotorAnimationChanges,
+  removeAnimation,
   toggleNodeExpansion,
   expandAllNodes,
   collapseAllNodes,
@@ -77,7 +85,6 @@ const {
   updateRotorTargetConfig,
   detectRotorPivotAxis,
   applyRotorAnimation,
-  removeRotorAnimation,
   setNodeColorTextureFile,
   applyNodeColor,
   revertNodeColor,
@@ -168,12 +175,14 @@ onMounted(async () => {
         :stats="stats"
         :is-animation-playing="isAnimationPlaying"
         :active-animation-indices="activeAnimationIndices"
+        :selected-animation-index="selectedAnimationIndex"
+        :selected-animation-detail="selectedAnimationDetail"
         v-model:rotor-animation-name="rotorAnimationName"
         :rotor-target-config-list="rotorTargetConfigList"
-        :rotor-animation-applied="rotorAnimationApplied"
         :can-apply-rotor-animation="canApplyRotorAnimation"
         :applying-rotor-animation="applyingRotorAnimation"
-        :removing-rotor-animation="removingRotorAnimation"
+        :applying-rotor-animation-changes="applyingRotorAnimationChanges"
+        :removing-animation="removingAnimation"
         v-model:node-color-mode="nodeColorMode"
         v-model:node-color-hex="nodeColorHex"
         :node-color-texture-file="nodeColorTextureFile"
@@ -183,7 +192,13 @@ onMounted(async () => {
         :applying-node-color="applyingNodeColor"
         :reverting-node-color="revertingNodeColor"
         @toggle-animation-playback="toggleAnimationPlayback"
+        @select-animation="selectAnimation"
         @play-animation="playAnimation"
+        @update-animation-settings="updateAnimationSettings"
+        @update-rotor-animation-target="updateRotorAnimationTarget"
+        @detect-rotor-animation-target="detectRotorAnimationTarget"
+        @apply-rotor-animation-changes="applyRotorAnimationChanges"
+        @remove-animation="removeAnimation"
         @update:model-position="setModelPosition"
         @update:selected-node-rotation="setSelectedNodeRotation"
         @reset-model-position="resetModelPosition"
@@ -191,7 +206,6 @@ onMounted(async () => {
         @update-rotor-config="updateRotorTargetConfig"
         @detect-rotor="detectRotorPivotAxis"
         @apply-rotor-animation="applyRotorAnimation"
-        @remove-rotor-animation="removeRotorAnimation"
         @node-color-texture-selected="setNodeColorTextureFile"
         @apply-node-color="applyNodeColor"
         @revert-node-color="revertNodeColor"

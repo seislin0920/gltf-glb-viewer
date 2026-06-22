@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { useScrubInput } from "../composables/useScrubInput";
+import AnimationDetailPanel from "./AnimationDetailPanel.vue";
 import RotorAnimationPanel from "./RotorAnimationPanel.vue";
 import NodeColorPanel from "./NodeColorPanel.vue";
 import type {
+  AnimationLoopMode,
   ModelStats,
   NodeColorMode,
   RotorTargetConfig,
+  SelectedAnimationDetail,
   SelectedNodeDetails,
   Vector3Values,
 } from "../types/glb-viewer";
@@ -23,15 +26,17 @@ const props = defineProps<{
   stats: ModelStats | null;
   isAnimationPlaying: boolean;
   activeAnimationIndices: ReadonlySet<number>;
+  selectedAnimationIndex: number | null;
+  selectedAnimationDetail: SelectedAnimationDetail | null;
+  applyingRotorAnimationChanges: boolean;
+  removingAnimation: boolean;
   rotorTargetConfigList: Array<{
     nodeId: string;
     nodeName: string;
     config: RotorTargetConfig;
   }>;
-  rotorAnimationApplied: boolean;
   canApplyRotorAnimation: boolean;
   applyingRotorAnimation: boolean;
-  removingRotorAnimation: boolean;
   nodeColorTargetList: Array<{
     nodeId: string;
     nodeName: string;
@@ -60,7 +65,28 @@ const collapsed = defineModel<boolean>("collapsed", { default: false });
 
 const emit = defineEmits<{
   "toggle-animation-playback": [];
+  "select-animation": [index: number];
   "play-animation": [index: number];
+  "update-animation-settings": [
+    index: number,
+    patch: {
+      name?: string;
+      timeScale?: number;
+      loopMode?: AnimationLoopMode;
+    },
+  ];
+  "update-rotor-animation-target": [
+    index: number,
+    pivotUuid: string,
+    patch: Partial<RotorTargetConfig>,
+  ];
+  "detect-rotor-animation-target": [
+    index: number,
+    pivotUuid: string,
+    kind: "pivot" | "axis" | "both",
+  ];
+  "apply-rotor-animation-changes": [index: number];
+  "remove-animation": [index: number];
   "update:model-position": [position: Vector3Values];
   "update:selected-node-rotation": [rotation: Vector3Values];
   "reset-model-position": [];
@@ -68,7 +94,6 @@ const emit = defineEmits<{
   "update-rotor-config": [nodeId: string, patch: Partial<RotorTargetConfig>];
   "detect-rotor": [nodeId: string, kind: "pivot" | "axis" | "both"];
   "apply-rotor-animation": [];
-  "remove-rotor-animation": [];
   "node-color-texture-selected": [file: File | null];
   "apply-node-color": [];
   "revert-node-color": [];
@@ -245,25 +270,6 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
           在輸入框按住並左右拖曳可微調數值；開啟檢視區移動模式後，也可拖曳三軸
           Gizmo 調整位置。
         </p>
-      </section>
-
-      <section v-if="hasModel" class="panel">
-        <div class="panel-heading">
-          <span>匯出 GLB</span>
-        </div>
-        <p class="export-hint muted">
-          將目前場景中的位置、旋轉與縮放變換寫入 GLB 並下載。
-        </p>
-        <div class="export-actions">
-          <button
-            class="export-button"
-            type="button"
-            :disabled="exporting || loading"
-            @click="emit('export-model')"
-          >
-            {{ exporting ? "匯出中…" : "下載 GLB" }}
-          </button>
-        </div>
       </section>
 
       <NodeColorPanel
@@ -447,16 +453,13 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
       <RotorAnimationPanel
         v-model:animation-name="rotorAnimationName"
         :targets="rotorTargetConfigList"
-        :rotor-animation-applied="rotorAnimationApplied"
         :can-apply-rotor-animation="canApplyRotorAnimation"
         :applying="applyingRotorAnimation"
-        :removing="removingRotorAnimation"
         @update-config="
           (nodeId, patch) => emit('update-rotor-config', nodeId, patch)
         "
         @detect="(nodeId, kind) => emit('detect-rotor', nodeId, kind)"
         @apply="emit('apply-rotor-animation')"
-        @remove="emit('remove-rotor-animation')"
       />
 
       <section v-if="stats?.animations.length" class="panel">
@@ -471,15 +474,97 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
           </button>
         </div>
         <div class="animation-list">
-          <button
+          <div
             v-for="(animation, index) in stats.animations"
             :key="`${animation.name}-${index}`"
-            type="button"
-            :class="{ active: activeAnimationIndices.has(index) }"
-            @click="emit('play-animation', index)"
+            class="animation-row"
+            :class="{ selected: selectedAnimationIndex === index }"
           >
-            <span>{{ animation.name }}</span>
-            <small>{{ animation.duration }}</small>
+            <button
+              class="animation-row__select"
+              type="button"
+              @click="emit('select-animation', index)"
+            >
+              <span>{{ animation.name }}</span>
+              <small>{{ animation.duration }}</small>
+            </button>
+            <button
+              class="animation-row__play"
+              type="button"
+              :class="{ playing: activeAnimationIndices.has(index) }"
+              :aria-label="
+                activeAnimationIndices.has(index) ? '暫停動畫' : '播放動畫'
+              "
+              @click="emit('play-animation', index)"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16">
+                <path
+                  v-if="activeAnimationIndices.has(index)"
+                  d="M5 3h2v10H5V3zm4 0h2v10H9V3z"
+                  fill="currentColor"
+                />
+                <path v-else d="M5 3.5v9l7-4.5-7-4.5z" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <AnimationDetailPanel
+          v-if="selectedAnimationDetail"
+          :detail="selectedAnimationDetail"
+          :applying-rotor-changes="applyingRotorAnimationChanges"
+          :removing="removingAnimation"
+          @update-settings="
+            (patch) =>
+              emit(
+                'update-animation-settings',
+                selectedAnimationDetail!.index,
+                patch,
+              )
+          "
+          @update-rotor-target="
+            (pivotUuid, patch) =>
+              emit(
+                'update-rotor-animation-target',
+                selectedAnimationDetail!.index,
+                pivotUuid,
+                patch,
+              )
+          "
+          @detect-rotor-target="
+            (pivotUuid, kind) =>
+              emit(
+                'detect-rotor-animation-target',
+                selectedAnimationDetail!.index,
+                pivotUuid,
+                kind,
+              )
+          "
+          @apply-rotor-changes="
+            emit(
+              'apply-rotor-animation-changes',
+              selectedAnimationDetail!.index,
+            )
+          "
+          @remove="emit('remove-animation', selectedAnimationDetail!.index)"
+        />
+      </section>
+
+      <section v-if="hasModel" class="panel">
+        <div class="panel-heading">
+          <span>匯出 GLB</span>
+        </div>
+        <p class="export-hint muted">
+          將目前場景中的位置、旋轉與縮放變換寫入 GLB 並下載。
+        </p>
+        <div class="export-actions">
+          <button
+            class="export-button"
+            type="button"
+            :disabled="exporting || loading"
+            @click="emit('export-model')"
+          >
+            {{ exporting ? "匯出中…" : "下載 GLB" }}
           </button>
         </div>
       </section>
@@ -681,24 +766,46 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
 }
 
 .animation-list {
-  @apply grid gap-2 px-3 pt-2.5 pb-3;
+  @apply grid gap-2 px-3 pt-2.5;
 }
 
-.animation-list button {
-  @apply flex min-h-[42px] w-full cursor-pointer items-center justify-between gap-3 rounded-button border border-line bg-surface-2 px-2.5 py-2 text-left text-text transition-[border-color,background-color] duration-150;
+.animation-row {
+  @apply flex items-stretch gap-1.5;
 }
 
-.animation-list button:hover,
-.animation-list button.active {
+.animation-row.selected .animation-row__select {
+  border-color: rgba(89, 168, 255, 0.65);
+  background: rgba(89, 168, 255, 0.08);
+}
+
+.animation-row__select {
+  @apply flex min-h-[42px] min-w-0 flex-1 cursor-pointer items-center justify-between gap-3 rounded-button border border-line bg-surface-2 px-2.5 py-2 text-left text-text transition-[border-color,background-color] duration-150;
+}
+
+.animation-row__select:hover {
+  border-color: rgba(89, 168, 255, 0.45);
+}
+
+.animation-row__play {
+  @apply inline-grid h-[42px] w-[42px] shrink-0 cursor-pointer place-items-center rounded-button border border-line bg-surface-2 text-text-muted transition-[border-color,background-color,color] duration-150;
+}
+
+.animation-row__play svg {
+  @apply h-4 w-4;
+}
+
+.animation-row__play:hover,
+.animation-row__play.playing {
   border-color: rgba(76, 201, 166, 0.65);
   background: var(--color-animation-hover-bg);
+  @apply text-accent-strong;
 }
 
-.animation-list span {
+.animation-row__select span {
   @apply min-w-0 font-bold wrap-anywhere;
 }
 
-.animation-list small {
+.animation-row__select small {
   @apply shrink-0 text-xs text-text-muted;
 }
 
