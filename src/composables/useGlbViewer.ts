@@ -369,11 +369,11 @@ export function useGlbViewer() {
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
     outlinePass = new OutlinePass(new THREE.Vector2(1, 1), scene, camera);
-    outlinePass.edgeStrength = 6;
+    outlinePass.edgeStrength = 10;
     outlinePass.edgeGlow = 0;
-    outlinePass.edgeThickness = 1.25;
-    outlinePass.visibleEdgeColor.set(0xffffff);
-    outlinePass.hiddenEdgeColor.set(0xffffff);
+    outlinePass.edgeThickness = 5;
+    outlinePass.visibleEdgeColor.set(0xff00ff);
+    outlinePass.hiddenEdgeColor.set(0xff00ff);
     outlinePass.pulsePeriod = 0;
     composer.addPass(outlinePass);
     composer.addPass(new OutputPass());

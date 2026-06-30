@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue'
+
+const MIN_SIDEBAR_LEFT_WIDTH = 240
+const MAX_SIDEBAR_LEFT_WIDTH = 720
 import AppHeader from './components/AppHeader.vue'
 import ModelInspector from './components/ModelInspector.vue'
 import ModelViewport from './components/ModelViewport.vue'
@@ -9,6 +12,41 @@ import { useGlbViewer } from './composables/useGlbViewer'
 const modelViewportRef = ref<InstanceType<typeof ModelViewport> | null>(null)
 const sceneSidebarCollapsed = ref(false)
 const inspectorCollapsed = ref(false)
+const sidebarLeftWidth = ref(400)
+const isResizingLeftSidebar = ref(false)
+
+function startLeftSidebarResize(event: PointerEvent) {
+  if (sceneSidebarCollapsed.value) {
+    return
+  }
+
+  event.preventDefault()
+
+  const startX = event.clientX
+  const startWidth = sidebarLeftWidth.value
+  isResizingLeftSidebar.value = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+
+  const handlePointerMove = (moveEvent: PointerEvent) => {
+    const nextWidth = startWidth + (moveEvent.clientX - startX)
+    sidebarLeftWidth.value = Math.min(
+      MAX_SIDEBAR_LEFT_WIDTH,
+      Math.max(MIN_SIDEBAR_LEFT_WIDTH, nextWidth),
+    )
+  }
+
+  const handlePointerUp = () => {
+    isResizingLeftSidebar.value = false
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    window.removeEventListener('pointermove', handlePointerMove)
+    window.removeEventListener('pointerup', handlePointerUp)
+  }
+
+  window.addEventListener('pointermove', handlePointerMove)
+  window.addEventListener('pointerup', handlePointerUp)
+}
 
 const {
   fileInputRef,
@@ -125,23 +163,40 @@ onMounted(async () => {
       :class="{
         'scene-sidebar-collapsed': sceneSidebarCollapsed,
         'inspector-collapsed': inspectorCollapsed,
+        'is-resizing-left-sidebar': isResizingLeftSidebar,
       }"
+      :style="
+        sceneSidebarCollapsed
+          ? undefined
+          : { '--sidebar-left-width': `${sidebarLeftWidth}px` }
+      "
     >
-      <SceneSidebar
-        v-model:collapsed="sceneSidebarCollapsed"
-        :has-model="hasModel"
-        :scene-nodes="sceneNodes"
-        :visible-scene-nodes="visibleSceneNodes"
-        v-model:node-search="nodeSearch"
-        :expanded-node-ids="expandedNodeIds"
-        :selected-node-id="selectedNodeId"
-        :selected-node-ids="selectedNodeIds"
-        @expand-all="expandAllNodes"
-        @collapse-all="collapseAllNodes"
-        @toggle-expansion="toggleNodeExpansion"
-        @select-node="(nodeId, additive) => selectNode(nodeId, false, additive)"
-        @toggle-node-selection="(nodeId) => toggleNodeSelection(nodeId, true)"
-      />
+      <div class="workspace-left">
+        <SceneSidebar
+          v-model:collapsed="sceneSidebarCollapsed"
+          :has-model="hasModel"
+          :scene-nodes="sceneNodes"
+          :visible-scene-nodes="visibleSceneNodes"
+          v-model:node-search="nodeSearch"
+          :expanded-node-ids="expandedNodeIds"
+          :selected-node-id="selectedNodeId"
+          :selected-node-ids="selectedNodeIds"
+          @expand-all="expandAllNodes"
+          @collapse-all="collapseAllNodes"
+          @toggle-expansion="toggleNodeExpansion"
+          @select-node="(nodeId, additive) => selectNode(nodeId, false, additive)"
+          @toggle-node-selection="(nodeId) => toggleNodeSelection(nodeId, true)"
+        />
+
+        <div
+          v-if="!sceneSidebarCollapsed"
+          class="sidebar-resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="調整場景側欄寬度"
+          @pointerdown="startLeftSidebarResize"
+        />
+      </div>
 
       <ModelViewport
         ref="modelViewportRef"
@@ -225,7 +280,7 @@ onMounted(async () => {
 }
 
 .workspace {
-  --sidebar-left-width: 300px;
+  --sidebar-left-width: 400px;
   --sidebar-right-width: 340px;
   --sidebar-rail-width: 44px;
   @apply grid min-h-0;
@@ -241,6 +296,26 @@ onMounted(async () => {
   --sidebar-right-width: var(--sidebar-rail-width);
 }
 
+.workspace-left {
+  @apply relative flex min-h-0 min-w-0;
+}
+
+.sidebar-resize-handle {
+  @apply absolute top-0 right-0 z-20 h-full w-1.5 touch-none;
+  transform: translateX(50%);
+  cursor: col-resize;
+}
+
+.sidebar-resize-handle::after {
+  content: '';
+  @apply absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-line transition-colors duration-150;
+}
+
+.sidebar-resize-handle:hover::after,
+.workspace.is-resizing-left-sidebar .sidebar-resize-handle::after {
+  @apply bg-accent;
+}
+
 .sr-only {
   @apply absolute -m-px h-px w-px overflow-hidden border-0 p-0 whitespace-nowrap;
   clip: rect(0, 0, 0, 0);
@@ -248,7 +323,7 @@ onMounted(async () => {
 
 @media (max-width: 1220px) {
   .workspace {
-    --sidebar-left-width: 260px;
+    --sidebar-left-width: 450px;
     --sidebar-right-width: 320px;
   }
 }
@@ -260,6 +335,10 @@ onMounted(async () => {
 
   .workspace {
     @apply flex flex-col;
+  }
+
+  .sidebar-resize-handle {
+    @apply hidden;
   }
 }
 </style>

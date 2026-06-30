@@ -140,7 +140,7 @@ function handleNodeClick(nodeId: string, event: MouseEvent) {
 @reference "../style.css";
 
 .scene-sidebar {
-  @apply flex max-h-[calc(100svh-72px)] min-w-0 flex-col gap-3 overflow-auto border-r border-line bg-surface p-3;
+  @apply flex max-h-[calc(100svh-72px)] min-w-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto border-r border-line bg-surface p-3;
 }
 
 .scene-sidebar.is-collapsed {
@@ -186,7 +186,7 @@ function handleNodeClick(nodeId: string, event: MouseEvent) {
 }
 
 .panel {
-  @apply min-w-0 overflow-hidden rounded-default border border-line bg-panel overflow-y-auto;
+  @apply min-w-0 overflow-x-hidden overflow-y-hidden rounded-default border border-line bg-panel;
 }
 
 .tree-panel {
@@ -227,11 +227,11 @@ function handleNodeClick(nodeId: string, event: MouseEvent) {
 }
 
 .node-tree {
-  @apply min-h-0 flex-1 overflow-auto px-1.5 pt-1 pb-2;
+  @apply min-h-0 flex-1 overflow-x-auto overflow-y-auto px-1.5 pt-1 pb-2;
 }
 
 .tree-row {
-  @apply flex h-[30px] min-w-0 items-center gap-[3px] rounded-segmented;
+  @apply flex h-[30px] w-max min-w-full items-center gap-[3px] rounded-segmented;
 }
 
 .tree-row:hover {
@@ -291,7 +291,7 @@ function handleNodeClick(nodeId: string, event: MouseEvent) {
 }
 
 .node-entry {
-  @apply grid h-[30px] min-w-0 flex-1 cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-[7px] bg-transparent pr-2 pl-0 text-left text-text transition-[border-color,background-color,color] duration-150;
+  @apply grid h-[30px] shrink-0 cursor-pointer grid-cols-[auto_auto] items-center gap-[7px] bg-transparent pr-2 pl-0 text-left text-text transition-[border-color,background-color,color] duration-150;
 }
 
 .node-type {
@@ -299,7 +299,7 @@ function handleNodeClick(nodeId: string, event: MouseEvent) {
 }
 
 .node-name {
-  @apply min-w-0 overflow-hidden text-sm leading-tight text-ellipsis whitespace-nowrap;
+  @apply text-sm leading-tight whitespace-nowrap;
 }
 
 .tree-empty {
