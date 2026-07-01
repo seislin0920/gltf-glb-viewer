@@ -16,7 +16,7 @@ export interface AnimationInfo {
 export type AnimationLoopMode = 'repeat' | 'once' | 'pingpong'
 
 export interface AnimationClipSettings {
-  source: 'imported' | 'rotor'
+  source: 'imported' | 'rotor' | 'wing' | 'wing-rig'
   timeScale: number
   loopMode: AnimationLoopMode
 }

@@ -90,6 +90,27 @@ const {
   canRevertNodeColor,
   applyingNodeColor,
   revertingNodeColor,
+  wingAnalysis,
+  wingMeshOptions,
+  wingLandmarkProgress,
+  wingLandmarkSteps,
+  wingLandmarkModeEnabled,
+  wingWorkflowMode,
+  wingRigReady,
+  wingPivotReady,
+  wingPresetReady,
+  wingWeightOptions,
+  wingWeightScaleHint,
+  wingWeightHeatmapEnabled,
+  wingPresetOptions,
+  wingAnimationOptions,
+  applyingWingPivot,
+  applyingWingRig,
+  applyingWingPreset,
+  leftWingNodeId,
+  rightWingNodeId,
+  wingRigTargetNodeId,
+  wingPresetName,
   bindViewportRefs,
   pickFiles,
   handleFileInput,
@@ -127,7 +148,20 @@ const {
   setNodeColorTextureFile,
   applyNodeColor,
   revertNodeColor,
+  toggleWingLandmarkMode,
+  setWingLandmarkStep,
+  clearWingLandmarks,
+  setWingWorkflowMode,
+  applyWingPivotAnimation,
+  applyWingRig,
+  applyWingPreset,
+  updateWingAnimationOptions,
+  updateWingWeightOptions,
+  recomputeWingSkinWeights,
+  toggleWingWeightHeatmap,
 } = useGlbViewer()
+
+void fileInputRef
 
 onMounted(async () => {
   await nextTick()
@@ -248,6 +282,27 @@ onMounted(async () => {
         :can-revert-node-color="canRevertNodeColor"
         :applying-node-color="applyingNodeColor"
         :reverting-node-color="revertingNodeColor"
+        :wing-analysis="wingAnalysis"
+        :wing-mesh-options="wingMeshOptions"
+        :wing-landmark-progress="wingLandmarkProgress"
+        :wing-landmark-steps="wingLandmarkSteps"
+        :wing-landmark-mode-enabled="wingLandmarkModeEnabled"
+        :wing-workflow-mode="wingWorkflowMode"
+        :wing-rig-ready="wingRigReady"
+        :wing-pivot-ready="wingPivotReady"
+        :wing-preset-ready="wingPresetReady"
+        :wing-weight-options="wingWeightOptions"
+        :wing-weight-scale-hint="wingWeightScaleHint"
+        :wing-weight-heatmap-enabled="wingWeightHeatmapEnabled"
+        :wing-preset-options="wingPresetOptions"
+        :wing-animation-options="wingAnimationOptions"
+        :applying-wing-pivot="applyingWingPivot"
+        :applying-wing-rig="applyingWingRig"
+        :applying-wing-preset="applyingWingPreset"
+        v-model:left-wing-node-id="leftWingNodeId"
+        v-model:right-wing-node-id="rightWingNodeId"
+        v-model:wing-rig-target-node-id="wingRigTargetNodeId"
+        v-model:wing-preset-name="wingPresetName"
         @toggle-animation-playback="toggleAnimationPlayback"
         @select-animation="selectAnimation"
         @play-animation="playAnimation"
@@ -266,6 +321,17 @@ onMounted(async () => {
         @node-color-texture-selected="setNodeColorTextureFile"
         @apply-node-color="applyNodeColor"
         @revert-node-color="revertNodeColor"
+        @toggle-wing-landmark-mode="toggleWingLandmarkMode"
+        @select-wing-landmark-step="setWingLandmarkStep"
+        @clear-wing-landmarks="clearWingLandmarks"
+        @wing-workflow-mode-change="setWingWorkflowMode"
+        @apply-wing-pivot="applyWingPivotAnimation"
+        @apply-wing-rig="applyWingRig"
+        @apply-wing-preset="applyWingPreset"
+        @update:wing-animation-options="updateWingAnimationOptions"
+        @update:wing-weight-options="updateWingWeightOptions"
+        @toggle-wing-weight-heatmap="toggleWingWeightHeatmap"
+        @recompute-wing-weights="recomputeWingSkinWeights"
       />
     </main>
   </div>

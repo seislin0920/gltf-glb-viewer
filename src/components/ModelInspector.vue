@@ -3,6 +3,8 @@ import { useScrubInput } from "../composables/useScrubInput";
 import AnimationDetailPanel from "./AnimationDetailPanel.vue";
 import RotorAnimationPanel from "./RotorAnimationPanel.vue";
 import NodeColorPanel from "./NodeColorPanel.vue";
+import WingRiggingPanel from "./WingRiggingPanel.vue";
+import type { BirdModelAnalysis, WingAnimationOptions, WingLandmarkStep, WingWeightOptions, WingWeightScaleHint, WingWorkflowMode } from "../types/wing-rigging";
 import type {
   AnimationLoopMode,
   ModelStats,
@@ -47,6 +49,23 @@ const props = defineProps<{
   canRevertNodeColor: boolean;
   applyingNodeColor: boolean;
   revertingNodeColor: boolean;
+  wingAnalysis: BirdModelAnalysis | null;
+  wingMeshOptions: Array<{ nodeId: string; nodeName: string }>;
+  wingLandmarkSteps: WingLandmarkStep[];
+  wingLandmarkProgress: { filled: number; total: number };
+  wingLandmarkModeEnabled: boolean;
+  wingWorkflowMode: WingWorkflowMode;
+  wingRigReady: boolean;
+  wingPivotReady: boolean;
+  wingPresetReady: boolean;
+  wingWeightOptions: WingWeightOptions;
+  wingWeightScaleHint: WingWeightScaleHint | null;
+  wingWeightHeatmapEnabled: boolean;
+  wingPresetOptions: string[];
+  wingAnimationOptions: WingAnimationOptions;
+  applyingWingPivot: boolean;
+  applyingWingRig: boolean;
+  applyingWingPreset: boolean;
 }>();
 
 const rotorAnimationName = defineModel<string>("rotorAnimationName", {
@@ -58,6 +77,22 @@ const nodeColorMode = defineModel<NodeColorMode>("nodeColorMode", {
 });
 
 const nodeColorHex = defineModel<string>("nodeColorHex", {
+  required: true,
+});
+
+const leftWingNodeId = defineModel<string>("leftWingNodeId", {
+  required: true,
+});
+
+const rightWingNodeId = defineModel<string>("rightWingNodeId", {
+  required: true,
+});
+
+const wingRigTargetNodeId = defineModel<string>("wingRigTargetNodeId", {
+  required: true,
+});
+
+const wingPresetName = defineModel<string>("wingPresetName", {
   required: true,
 });
 
@@ -101,6 +136,17 @@ const emit = defineEmits<{
   "node-color-texture-selected": [file: File | null];
   "apply-node-color": [];
   "revert-node-color": [];
+  "toggle-wing-landmark-mode": [];
+  "select-wing-landmark-step": [index: number];
+  "clear-wing-landmarks": [];
+  "wing-workflow-mode-change": [mode: WingWorkflowMode];
+  "apply-wing-pivot": [];
+  "apply-wing-rig": [];
+  "apply-wing-preset": [];
+  "update:wing-animation-options": [value: WingAnimationOptions];
+  "update:wing-weight-options": [value: WingWeightOptions];
+  "toggle-wing-weight-heatmap": [enabled: boolean];
+  "recompute-wing-weights": [];
 }>();
 
 function setModelAxis(axis: keyof Vector3Values, value: number) {
@@ -290,6 +336,42 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
         @texture-selected="(file) => emit('node-color-texture-selected', file)"
         @apply="emit('apply-node-color')"
         @revert="emit('revert-node-color')"
+      />
+
+      <WingRiggingPanel
+        v-if="hasModel"
+        :analysis="wingAnalysis"
+        :mesh-options="wingMeshOptions"
+        :workflow-mode="wingWorkflowMode"
+        :landmark-steps="wingLandmarkSteps"
+        :landmark-progress="wingLandmarkProgress"
+        :is-marking="wingLandmarkModeEnabled"
+        :rig-ready="wingRigReady"
+        :pivot-ready="wingPivotReady"
+        :preset-ready="wingPresetReady"
+        :weight-options="wingWeightOptions"
+        :weight-scale-hint="wingWeightScaleHint"
+        :weight-heatmap-enabled="wingWeightHeatmapEnabled"
+        :preset-options="wingPresetOptions"
+        :animation-options="wingAnimationOptions"
+        :applying-pivot="applyingWingPivot"
+        :applying-rig="applyingWingRig"
+        :applying-preset="applyingWingPreset"
+        v-model:left-wing-node-id="leftWingNodeId"
+        v-model:right-wing-node-id="rightWingNodeId"
+        v-model:rig-target-node-id="wingRigTargetNodeId"
+        v-model:preset-name="wingPresetName"
+        @toggle-landmark-mode="emit('toggle-wing-landmark-mode')"
+        @select-landmark-step="(index) => emit('select-wing-landmark-step', index)"
+        @clear-landmarks="emit('clear-wing-landmarks')"
+        @workflow-mode-change="(mode) => emit('wing-workflow-mode-change', mode)"
+        @apply-pivot="emit('apply-wing-pivot')"
+        @apply-rig="emit('apply-wing-rig')"
+        @apply-preset="emit('apply-wing-preset')"
+        @update:animation-options="(value) => emit('update:wing-animation-options', value)"
+        @update:weight-options="(value) => emit('update:wing-weight-options', value)"
+        @toggle-weight-heatmap="(enabled) => emit('toggle-wing-weight-heatmap', enabled)"
+        @recompute-weights="emit('recompute-wing-weights')"
       />
 
       <section v-if="selectedNodeDetails" class="panel">

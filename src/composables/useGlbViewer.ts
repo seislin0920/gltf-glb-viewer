@@ -55,12 +55,26 @@ import {
   createDefaultRotorTargetConfig,
   DEFAULT_ANIMATION_NAME,
   estimatePivotAndAxis,
+  createPivotForTarget,
   rebuildRotorAnimationClip,
   removeRotorClipPivots,
   resolveTargetConfig,
   resetRotorPivotsToBindPose,
   validateRotorTarget,
 } from "../lib/addRotorAnimation";
+import { analyzeBirdModel } from "../lib/wing-rigging/analyzeBirdModel";
+import { applyWingRigToMesh } from "../lib/wing-rigging/applyWingRig";
+import { buildBirdSkeleton } from "../lib/wing-rigging/buildBirdSkeleton";
+import { computeWingSkinWeights } from "../lib/wing-rigging/computeWingSkinWeights";
+import { createFlapClipForPivot } from "../lib/wing-rigging/createFlapClipForPivot";
+import { presetToAnimationClip } from "../lib/wing-rigging/presetToClip";
+import {
+  applyWeightHeatmap,
+  disposeWeightHeatmap,
+  removeWeightHeatmap,
+} from "../lib/wing-rigging/visualizeWingSkinWeights";
+import { buildWingWeightScaleHint } from "../lib/wing-rigging/resolveWingWeightScale";
+import { wingFlapPresets } from "../lib/wing-rigging/wingFlapPresets";
 import {
   applyNodeColor as applyNodeColorToMeshes,
   collectDirectMeshes,
@@ -68,6 +82,16 @@ import {
   revertNodeColorBatch,
   type NodeColorBatch,
 } from "../lib/applyNodeColor";
+import type {
+  BirdModelAnalysis,
+  WingAnimationOptions,
+  WingLandmarkId,
+  WingLandmarks,
+  WingWeightOptions,
+  WingWeightScaleHint,
+  WingWorkflowMode,
+} from "../types/wing-rigging";
+import { DEFAULT_WING_WEIGHT_OPTIONS, WING_LANDMARK_STEPS } from "../types/wing-rigging";
 import type {
   AnimationClipSettings,
   AnimationLoopMode,
@@ -136,6 +160,30 @@ export function useGlbViewer() {
   const nodeColorBatches = ref<NodeColorBatch[]>([]);
   const applyingNodeColor = ref(false);
   const revertingNodeColor = ref(false);
+  const wingAnalysis = ref<BirdModelAnalysis | null>(null);
+  const leftWingNodeId = ref("");
+  const rightWingNodeId = ref("");
+  const wingRigTargetNodeId = ref("");
+  const wingPresetName = ref(wingFlapPresets[0]?.name ?? "slow_flap");
+  const wingAnimationOptions = ref<WingAnimationOptions>({
+    speedMultiplier: 1,
+    amplitudeMultiplier: 1,
+    mirrorRight: true,
+    loopMode: "repeat",
+  });
+  const wingLandmarks = ref<Partial<WingLandmarks>>({});
+  const wingLandmarkIndex = ref(0);
+  const wingLandmarkModeEnabled = ref(false);
+  const wingWorkflowMode = ref<WingWorkflowMode>("full-rig");
+  const wingRigReady = ref(false);
+  const wingPivotReady = ref(false);
+  const wingWeightOptions = ref<WingWeightOptions>({
+    ...DEFAULT_WING_WEIGHT_OPTIONS,
+  });
+  const wingWeightHeatmapEnabled = ref(false);
+  const applyingWingPivot = ref(false);
+  const applyingWingRig = ref(false);
+  const applyingWingPreset = ref(false);
   const nodeSearch = ref("");
   const moveModeEnabled = ref(false);
   const modelPosition = ref<Vector3Values>({ x: 0, y: 0, z: 0 });
@@ -270,6 +318,72 @@ export function useGlbViewer() {
     return true;
   });
   const canRevertNodeColor = computed(() => nodeColorBatches.value.length > 0);
+  const wingMeshOptions = computed(() =>
+    sceneNodes.value
+      .map((node) => ({
+        nodeId: node.id,
+        nodeName: node.name,
+        object: objectByNodeId.get(node.id),
+      }))
+      .filter((item) => item.object && isMesh(item.object))
+      .map(({ nodeId, nodeName }) => ({ nodeId, nodeName })),
+  );
+  const wingLandmarkProgress = computed(() => {
+    const filled = Object.keys(wingLandmarks.value).length;
+    return { filled, total: WING_LANDMARK_STEPS.length };
+  });
+  const wingLandmarkSteps = computed(() => {
+    const landmarks = wingLandmarks.value;
+    const focusIndex = wingLandmarkIndex.value;
+    const allComplete = WING_LANDMARK_STEPS.every((step) => landmarks[step.id]);
+
+    return WING_LANDMARK_STEPS.map((step, index) => {
+      const done = Boolean(landmarks[step.id]);
+      let status: "pending" | "active" | "done";
+
+      if (!allComplete && index === focusIndex) {
+        status = "active";
+      } else if (done) {
+        status = "done";
+      } else {
+        status = "pending";
+      }
+
+      return {
+        ...step,
+        index,
+        status,
+      };
+    });
+  });
+  const wingPresetReady = computed(() =>
+    wingWorkflowMode.value === "node-pivot"
+      ? wingPivotReady.value
+      : wingRigReady.value,
+  );
+  const wingWeightScaleHint = computed<WingWeightScaleHint | null>(() => {
+    if (wingRigReady.value && wingRigLocalLandmarks) {
+      return buildWingWeightScaleHint(
+        wingWeightOptions.value,
+        wingRigLocalLandmarks as WingLandmarks,
+      );
+    }
+
+    const landmarks = wingLandmarks.value;
+    for (const step of WING_LANDMARK_STEPS) {
+      if (!landmarks[step.id]) {
+        return null;
+      }
+    }
+
+    return buildWingWeightScaleHint(
+      wingWeightOptions.value,
+      landmarks as WingLandmarks,
+    );
+  });
+  const wingPresetOptions = computed(() =>
+    wingFlapPresets.map((preset) => preset.name),
+  );
 
   let renderer: THREE.WebGLRenderer | null = null;
   let composer: EffectComposer | null = null;
@@ -291,6 +405,13 @@ export function useGlbViewer() {
   let currentObjectUrls: string[] = [];
   let pointerDown: { x: number; y: number; button: number } | null = null;
   let sceneInitialized = false;
+  let wingLandmarkGroup: THREE.Group | null = null;
+  let wingSkeletonHelper: THREE.SkeletonHelper | null = null;
+  let wingPreviewRootBone: THREE.Bone | null = null;
+  let wingBoneByName: Map<string, THREE.Bone> | null = null;
+  let wingRiggedMesh: THREE.SkinnedMesh | null = null;
+  let wingRigLocalLandmarks: Record<string, THREE.Vector3> | null = null;
+  let wingBoneIndexByName: Record<string, number> | null = null;
 
   const clock = new THREE.Clock();
   const raycaster = new THREE.Raycaster();
@@ -299,6 +420,9 @@ export function useGlbViewer() {
   const modelOriginOffset = new THREE.Vector3();
   const objectByNodeId = new Map<string, THREE.Object3D>();
   const nodeIdByObjectUuid = new Map<string, string>();
+  const wingLandmarkOrder: WingLandmarkId[] = WING_LANDMARK_STEPS.map(
+    (step) => step.id,
+  );
 
   onBeforeUnmount(() => {
     cancelAnimationFrame(frameId);
@@ -315,6 +439,11 @@ export function useGlbViewer() {
     }
     transformControls = null;
     transformControlsHelper = null;
+    if (scene && wingLandmarkGroup) {
+      scene.remove(wingLandmarkGroup);
+    }
+    clearWingRigRuntimeState();
+    wingLandmarkGroup = null;
     controls?.dispose();
     composer?.dispose();
     renderer?.dispose();
@@ -553,6 +682,12 @@ export function useGlbViewer() {
 
     if (viewHelper?.handleClick(event)) {
       return;
+    }
+
+    if (wingLandmarkModeEnabled.value) {
+      if (placeWingLandmark(event)) {
+        return;
+      }
     }
 
     if (moveModeEnabled.value) {
@@ -807,6 +942,7 @@ export function useGlbViewer() {
     mixer = gltf.animations.length > 0 ? new THREE.AnimationMixer(root) : null;
 
     buildSceneTree(root, primaryFile.name);
+    updateWingAnalysis(root);
     applyWireframe();
 
     const fittedBox = new THREE.Box3().setFromObject(root);
@@ -870,6 +1006,26 @@ export function useGlbViewer() {
       modelLoaded.value = false;
       hasImportedAnimations.value = false;
       clearNodeColorBatches();
+      wingAnalysis.value = null;
+      leftWingNodeId.value = "";
+      rightWingNodeId.value = "";
+      wingRigTargetNodeId.value = "";
+      wingLandmarks.value = {};
+      wingLandmarkIndex.value = 0;
+      wingLandmarkModeEnabled.value = false;
+      wingWorkflowMode.value = "full-rig";
+      wingRigReady.value = false;
+      wingPivotReady.value = false;
+      wingWeightOptions.value = { ...DEFAULT_WING_WEIGHT_OPTIONS };
+      wingWeightHeatmapEnabled.value = false;
+      applyingWingPivot.value = false;
+      applyingWingRig.value = false;
+      applyingWingPreset.value = false;
+      clearWingRigRuntimeState();
+      if (scene && wingLandmarkGroup) {
+        scene.remove(wingLandmarkGroup);
+      }
+      wingLandmarkGroup = null;
       stats.value = null;
       exportFileName.value = "";
       return;
@@ -919,6 +1075,26 @@ export function useGlbViewer() {
     modelLoaded.value = false;
     hasImportedAnimations.value = false;
     stats.value = null;
+    wingAnalysis.value = null;
+    leftWingNodeId.value = "";
+    rightWingNodeId.value = "";
+    wingRigTargetNodeId.value = "";
+    wingLandmarks.value = {};
+    wingLandmarkIndex.value = 0;
+    wingLandmarkModeEnabled.value = false;
+    wingWorkflowMode.value = "full-rig";
+    wingRigReady.value = false;
+    wingPivotReady.value = false;
+    wingWeightOptions.value = { ...DEFAULT_WING_WEIGHT_OPTIONS };
+    wingWeightHeatmapEnabled.value = false;
+    applyingWingPivot.value = false;
+    applyingWingRig.value = false;
+    applyingWingPreset.value = false;
+    clearWingRigRuntimeState();
+    if (scene && wingLandmarkGroup) {
+      scene.remove(wingLandmarkGroup);
+    }
+    wingLandmarkGroup = null;
     exportFileName.value = "";
   }
 
@@ -1675,6 +1851,529 @@ export function useGlbViewer() {
     nodeColorTextureFile.value = null;
   }
 
+  function resolveNodeId(uuid?: string) {
+    if (!uuid) {
+      return "";
+    }
+    return nodeIdByObjectUuid.get(uuid) ?? "";
+  }
+
+  function updateWingAnalysis(root: THREE.Object3D) {
+    const analysis = analyzeBirdModel(root);
+    wingAnalysis.value = analysis;
+    leftWingNodeId.value = resolveNodeId(analysis.leftWingMeshCandidates[0]);
+    rightWingNodeId.value = resolveNodeId(analysis.rightWingMeshCandidates[0]);
+    wingRigTargetNodeId.value = resolveNodeId(
+      analysis.bodyMeshCandidates[0] ??
+        analysis.leftWingMeshCandidates[0] ??
+        analysis.rightWingMeshCandidates[0],
+    );
+    wingWorkflowMode.value =
+      analysis.suggestedMode === "node-pivot" ? "node-pivot" : "full-rig";
+  }
+
+  function clearWingSkeletonPreview() {
+    if (wingPreviewRootBone?.parent) {
+      wingPreviewRootBone.parent.remove(wingPreviewRootBone);
+    }
+    wingPreviewRootBone = null;
+
+    if (!wingRiggedMesh && scene && wingSkeletonHelper) {
+      scene.remove(wingSkeletonHelper);
+      wingSkeletonHelper = null;
+    }
+  }
+
+  function clearWingRigRuntimeState() {
+    disposeWeightHeatmap(wingRiggedMesh);
+    if (wingPreviewRootBone?.parent) {
+      wingPreviewRootBone.parent.remove(wingPreviewRootBone);
+    }
+    wingPreviewRootBone = null;
+    if (scene && wingSkeletonHelper) {
+      scene.remove(wingSkeletonHelper);
+      wingSkeletonHelper = null;
+    }
+    wingBoneByName = null;
+    wingRiggedMesh = null;
+    wingRigLocalLandmarks = null;
+    wingBoneIndexByName = null;
+  }
+
+  function getLandmarkMarkerRadius(active: boolean) {
+    let base = 0.015;
+
+    if (modelRoot) {
+      const box = new THREE.Box3().setFromObject(modelRoot);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      base = Math.min(0.015, maxDim * 0.008);
+    }
+
+    return active ? base * 1.3 : base;
+  }
+
+  function refreshWingLandmarkMarkerSizes() {
+    if (!wingLandmarkGroup) {
+      return;
+    }
+
+    const activeId = wingLandmarkOrder[wingLandmarkIndex.value];
+    wingLandmarkGroup.children.forEach((child) => {
+      if (!(child instanceof THREE.Mesh)) {
+        return;
+      }
+
+      const id = child.name.replace("WingLandmark_", "") as WingLandmarkId;
+      const radius = getLandmarkMarkerRadius(id === activeId);
+      child.geometry.dispose();
+      child.geometry = new THREE.SphereGeometry(radius, 16, 16);
+    });
+  }
+
+  function ensureWingLandmarkGroup() {
+    if (!scene) {
+      return null;
+    }
+    if (!wingLandmarkGroup) {
+      wingLandmarkGroup = new THREE.Group();
+      wingLandmarkGroup.name = "WingLandmarks";
+      scene.add(wingLandmarkGroup);
+    }
+    return wingLandmarkGroup;
+  }
+
+  function upsertWingLandmarkMarker(id: WingLandmarkId, position: THREE.Vector3) {
+    const group = ensureWingLandmarkGroup();
+    if (!group) {
+      return;
+    }
+
+    const markerName = `WingLandmark_${id}`;
+    const activeId = wingLandmarkOrder[wingLandmarkIndex.value];
+    let marker = group.getObjectByName(markerName) as THREE.Mesh | null;
+    if (!marker) {
+      const radius = getLandmarkMarkerRadius(id === activeId);
+      const geometry = new THREE.SphereGeometry(radius, 16, 16);
+      const material = new THREE.MeshBasicMaterial({
+        color: id.startsWith("L_") ? 0x58a6ff : 0xf78166,
+      });
+      marker = new THREE.Mesh(geometry, material);
+      marker.name = markerName;
+      group.add(marker);
+    }
+    marker.position.copy(position);
+    refreshWingLandmarkMarkerSizes();
+  }
+
+  function clearWingLandmarkMarkers() {
+    if (!wingLandmarkGroup) {
+      return;
+    }
+    wingLandmarkGroup.clear();
+  }
+
+  function syncWingLandmarkIndex() {
+    const nextIndex = wingLandmarkOrder.findIndex(
+      (id) => !wingLandmarks.value[id],
+    );
+    wingLandmarkIndex.value =
+      nextIndex === -1 ? wingLandmarkOrder.length - 1 : nextIndex;
+    refreshWingLandmarkMarkerSizes();
+  }
+
+  function updateWingSkeletonPreview() {
+    if (wingRigReady.value) {
+      return;
+    }
+
+    clearWingSkeletonPreview();
+
+    const landmarks = collectCompleteLandmarks();
+    if (!landmarks || !modelRoot || !scene) {
+      return;
+    }
+
+    const target = objectByNodeId.get(wingRigTargetNodeId.value);
+    const parent = target?.parent ?? modelRoot;
+    const { rootBone } = buildBirdSkeleton(landmarks, parent);
+    parent.add(rootBone);
+    wingPreviewRootBone = rootBone;
+
+    wingSkeletonHelper = new THREE.SkeletonHelper(rootBone);
+    wingSkeletonHelper.visible = true;
+    scene.add(wingSkeletonHelper);
+  }
+
+  function setWingLandmark(id: WingLandmarkId, position: THREE.Vector3) {
+    wingLandmarks.value = {
+      ...wingLandmarks.value,
+      [id]: position.clone(),
+    };
+    upsertWingLandmarkMarker(id, position);
+    syncWingLandmarkIndex();
+
+    if (collectCompleteLandmarks()) {
+      updateWingSkeletonPreview();
+    } else {
+      clearWingSkeletonPreview();
+    }
+  }
+
+  function placeWingLandmark(event: PointerEvent) {
+    if (!camera || !modelRoot || !canvasRef.value) {
+      return false;
+    }
+
+    const rect = canvasRef.value.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return false;
+    }
+
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+
+    const pickableMeshes: THREE.Object3D[] = [];
+    modelRoot.traverse((object) => {
+      if (isMesh(object)) {
+        pickableMeshes.push(object);
+      }
+    });
+
+    const [hit] = raycaster.intersectObjects(pickableMeshes, false);
+    if (!hit) {
+      return false;
+    }
+
+    const id = wingLandmarkOrder[wingLandmarkIndex.value];
+    if (id) {
+      setWingLandmark(id, hit.point.clone());
+    }
+
+    return true;
+  }
+
+  function toggleWingLandmarkMode() {
+    wingLandmarkModeEnabled.value = !wingLandmarkModeEnabled.value;
+  }
+
+  function setWingLandmarkStep(index: number) {
+    if (index < 0 || index >= wingLandmarkOrder.length) {
+      return;
+    }
+
+    wingLandmarkIndex.value = index;
+    wingLandmarkModeEnabled.value = true;
+    refreshWingLandmarkMarkerSizes();
+  }
+
+  function clearWingLandmarks() {
+    wingLandmarks.value = {};
+    wingLandmarkIndex.value = 0;
+    clearWingLandmarkMarkers();
+    clearWingSkeletonPreview();
+    refreshWingLandmarkMarkerSizes();
+  }
+
+  function setWingWorkflowMode(mode: WingWorkflowMode) {
+    if (mode === wingWorkflowMode.value) {
+      return;
+    }
+
+    wingWorkflowMode.value = mode;
+
+    if (mode === "node-pivot") {
+      clearWingLandmarks();
+      clearWingRigRuntimeState();
+      wingRigReady.value = false;
+      wingLandmarkModeEnabled.value = false;
+    } else {
+      wingPivotReady.value = false;
+    }
+  }
+
+  function collectCompleteLandmarks(): WingLandmarks | null {
+    const landmarks = wingLandmarks.value;
+    for (const id of wingLandmarkOrder) {
+      if (!landmarks[id]) {
+        return null;
+      }
+    }
+
+    return landmarks as WingLandmarks;
+  }
+
+  function addAnimationClip(
+    clip: THREE.AnimationClip,
+    meta: StoredAnimationClipMeta,
+  ) {
+    if (!modelRoot) {
+      return;
+    }
+
+    const nextClips = [...animationClips.value, clip];
+    animationClips.value = nextClips;
+    setClipMeta(clip, meta);
+
+    if (!mixer) {
+      mixer = new THREE.AnimationMixer(modelRoot);
+    }
+
+    const action = mixer.clipAction(clip).reset().play();
+    applyClipActionSettings(action, meta);
+
+    activeAnimationIndices.value = new Set([
+      ...activeAnimationIndices.value,
+      nextClips.length - 1,
+    ]);
+    selectedAnimationIndex.value = nextClips.length - 1;
+    isAnimationPlaying.value = true;
+    syncAnimationStats();
+  }
+
+  function applyWingPivotAnimation() {
+    if (!modelRoot || applyingWingPivot.value) {
+      return;
+    }
+
+    if (!leftWingNodeId.value || !rightWingNodeId.value) {
+      errorMessage.value = "請選擇左右翅節點。";
+      return;
+    }
+
+    const leftObject = objectByNodeId.get(leftWingNodeId.value);
+    const rightObject = objectByNodeId.get(rightWingNodeId.value);
+
+    if (!leftObject || !rightObject || !isMesh(leftObject) || !isMesh(rightObject)) {
+      errorMessage.value = "左右翅節點必須是 Mesh。";
+      return;
+    }
+
+    applyingWingPivot.value = true;
+    errorMessage.value = "";
+
+    try {
+      const leftPivot = createPivotForTarget(
+        leftObject,
+        getObjectPivotLocal(leftObject),
+      );
+      const rightPivot = createPivotForTarget(
+        rightObject,
+        getObjectPivotLocal(rightObject),
+      );
+      const clip = createFlapClipForPivot(
+        [
+          { pivot: leftPivot, mirrorSign: 1 },
+          { pivot: rightPivot, mirrorSign: -1 },
+        ],
+        {
+          name: `WingPivot_${wingPresetName.value}`,
+          duration: 0.8 / wingAnimationOptions.value.speedMultiplier,
+          amplitude: 0.6 * wingAnimationOptions.value.amplitudeMultiplier,
+          axis: "z",
+        },
+      );
+
+      addAnimationClip(clip, {
+        ...createDefaultClipMeta("wing"),
+        loopMode: wingAnimationOptions.value.loopMode,
+      });
+      wingPivotReady.value = true;
+      rebuildSceneTreePreservingSelection();
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "套用翅膀 pivot 失敗。";
+    } finally {
+      applyingWingPivot.value = false;
+    }
+  }
+
+  function getObjectPivotLocal(object: THREE.Object3D) {
+    const box = new THREE.Box3().setFromObject(object);
+    const center = box.getCenter(new THREE.Vector3());
+    if (!object.parent) {
+      return center;
+    }
+    object.parent.updateMatrixWorld(true);
+    return center.applyMatrix4(object.parent.matrixWorld.clone().invert());
+  }
+
+  function applyWingRig() {
+    if (!modelRoot || applyingWingRig.value) {
+      return;
+    }
+
+    const targetId = wingRigTargetNodeId.value;
+    if (!targetId) {
+      errorMessage.value = "請選擇要套用 Rig 的 Mesh。";
+      return;
+    }
+
+    const target = objectByNodeId.get(targetId);
+    if (!target || !isMesh(target)) {
+      errorMessage.value = "目標節點不是 Mesh。";
+      return;
+    }
+
+    const landmarks = collectCompleteLandmarks();
+    if (!landmarks) {
+      errorMessage.value = "請先完成 6 點標記。";
+      return;
+    }
+
+    applyingWingRig.value = true;
+    errorMessage.value = "";
+
+    try {
+      clearWingSkeletonPreview();
+      const parent = target.parent ?? modelRoot;
+      const { skinned, boneByName, localLandmarks } = applyWingRigToMesh(
+        target,
+        landmarks,
+        parent,
+        wingWeightOptions.value,
+      );
+
+      parent.add(skinned);
+      parent.remove(target);
+
+      const boneIndexByName: Record<string, number> = {};
+      skinned.skeleton.bones.forEach((bone, index) => {
+        boneIndexByName[bone.name] = index;
+      });
+
+      if (scene) {
+        wingSkeletonHelper = new THREE.SkeletonHelper(skinned);
+        wingSkeletonHelper.visible = true;
+        scene.add(wingSkeletonHelper);
+      }
+
+      wingBoneByName = boneByName;
+      wingRiggedMesh = skinned;
+      wingRigLocalLandmarks = localLandmarks;
+      wingBoneIndexByName = boneIndexByName;
+      wingRigReady.value = true;
+      wingLandmarkModeEnabled.value = false;
+
+      if (wingWeightHeatmapEnabled.value) {
+        applyWeightHeatmap(skinned, boneIndexByName);
+      }
+
+      rebuildSceneTreePreservingSelection();
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "套用翅膀 Rig 失敗。";
+    } finally {
+      applyingWingRig.value = false;
+    }
+  }
+
+  function applyWingPreset() {
+    if (!modelRoot || applyingWingPreset.value) {
+      return;
+    }
+
+    if (wingWorkflowMode.value === "node-pivot") {
+      if (!wingPivotReady.value) {
+        errorMessage.value = "請先套用 Pivot 拍翅。";
+        return;
+      }
+      applyWingPivotAnimation();
+      return;
+    }
+
+    if (!wingRigReady.value || !wingBoneByName) {
+      errorMessage.value = "請先完成骨骼 Rig。";
+      return;
+    }
+
+    const preset = wingFlapPresets.find(
+      (item) => item.name === wingPresetName.value,
+    );
+    if (!preset) {
+      errorMessage.value = "找不到指定的拍翅 preset。";
+      return;
+    }
+
+    applyingWingPreset.value = true;
+    errorMessage.value = "";
+
+    try {
+      const clip = presetToAnimationClip(preset, wingBoneByName, {
+        speedMultiplier: wingAnimationOptions.value.speedMultiplier,
+        amplitudeMultiplier: wingAnimationOptions.value.amplitudeMultiplier,
+        mirrorRight: wingAnimationOptions.value.mirrorRight,
+        loopMode: wingAnimationOptions.value.loopMode,
+      });
+
+      addAnimationClip(clip, {
+        ...createDefaultClipMeta("wing-rig"),
+        loopMode: wingAnimationOptions.value.loopMode,
+      });
+    } catch (error) {
+      errorMessage.value =
+        error instanceof Error ? error.message : "套用拍翅 preset 失敗。";
+    } finally {
+      applyingWingPreset.value = false;
+    }
+  }
+
+  function recomputeWingSkinWeights() {
+    if (!wingRiggedMesh || !wingRigLocalLandmarks || !wingBoneIndexByName) {
+      return;
+    }
+
+    const geometry = wingRiggedMesh.geometry;
+    const position = geometry.getAttribute("position") as THREE.BufferAttribute;
+    if (!position) {
+      return;
+    }
+
+    const { skinIndex, skinWeight } = computeWingSkinWeights(
+      position,
+      wingRigLocalLandmarks,
+      wingBoneIndexByName,
+      wingWeightOptions.value,
+    );
+
+    geometry.setAttribute("skinIndex", skinIndex);
+    geometry.setAttribute("skinWeight", skinWeight);
+    skinIndex.needsUpdate = true;
+    skinWeight.needsUpdate = true;
+    wingRiggedMesh.normalizeSkinWeights();
+
+    if (wingWeightHeatmapEnabled.value) {
+      applyWeightHeatmap(wingRiggedMesh, wingBoneIndexByName);
+    }
+  }
+
+  function updateWingWeightOptions(next: WingWeightOptions) {
+    wingWeightOptions.value = { ...next };
+    if (wingRigReady.value) {
+      recomputeWingSkinWeights();
+    }
+  }
+
+  function toggleWingWeightHeatmap(enabled: boolean) {
+    wingWeightHeatmapEnabled.value = enabled;
+
+    if (!wingRiggedMesh || !wingBoneIndexByName) {
+      return;
+    }
+
+    if (enabled) {
+      applyWeightHeatmap(wingRiggedMesh, wingBoneIndexByName);
+      return;
+    }
+
+    removeWeightHeatmap(wingRiggedMesh);
+  }
+
+  function updateWingAnimationOptions(next: WingAnimationOptions) {
+    wingAnimationOptions.value = { ...next };
+  }
+
   function buildSceneTree(
     root: THREE.Object3D,
     fileName: string,
@@ -2205,6 +2904,27 @@ export function useGlbViewer() {
     canRevertNodeColor,
     applyingNodeColor,
     revertingNodeColor,
+    wingAnalysis,
+    wingMeshOptions,
+    wingLandmarkProgress,
+    wingLandmarkSteps,
+    wingLandmarkModeEnabled,
+    wingWorkflowMode,
+    wingRigReady,
+    wingPivotReady,
+    wingPresetReady,
+    wingWeightOptions,
+    wingWeightScaleHint,
+    wingWeightHeatmapEnabled,
+    wingPresetOptions,
+    wingAnimationOptions,
+    applyingWingPivot,
+    applyingWingRig,
+    applyingWingPreset,
+    leftWingNodeId,
+    rightWingNodeId,
+    wingRigTargetNodeId,
+    wingPresetName,
     nodeSearch,
     visibleSceneNodes,
     selectedNodeDetails,
@@ -2248,5 +2968,16 @@ export function useGlbViewer() {
     setNodeColorTextureFile,
     applyNodeColor,
     revertNodeColor,
+    toggleWingLandmarkMode,
+    setWingLandmarkStep,
+    clearWingLandmarks,
+    setWingWorkflowMode,
+    applyWingPivotAnimation,
+    applyWingRig,
+    applyWingPreset,
+    updateWingAnimationOptions,
+    updateWingWeightOptions,
+    recomputeWingSkinWeights,
+    toggleWingWeightHeatmap,
   };
 }
