@@ -51,6 +51,8 @@ const props = defineProps<{
   revertingNodeColor: boolean;
   wingAnalysis: BirdModelAnalysis | null;
   wingMeshOptions: Array<{ nodeId: string; nodeName: string }>;
+  wingUnboundMeshOptions: Array<{ nodeId: string; nodeName: string }>;
+  wingBoundMeshLabels: string[];
   wingLandmarkSteps: WingLandmarkStep[];
   wingLandmarkProgress: { filled: number; total: number };
   wingLandmarkModeEnabled: boolean;
@@ -342,6 +344,8 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
         v-if="hasModel"
         :analysis="wingAnalysis"
         :mesh-options="wingMeshOptions"
+        :unbound-mesh-options="wingUnboundMeshOptions"
+        :bound-mesh-labels="wingBoundMeshLabels"
         :workflow-mode="wingWorkflowMode"
         :landmark-steps="wingLandmarkSteps"
         :landmark-progress="wingLandmarkProgress"
@@ -373,6 +377,94 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
         @toggle-weight-heatmap="(enabled) => emit('toggle-wing-weight-heatmap', enabled)"
         @recompute-weights="emit('recompute-wing-weights')"
       />
+
+      <section v-if="stats?.animations.length" class="panel">
+        <div class="panel-heading">
+          <span>動畫</span>
+          <button
+            class="compact-button"
+            type="button"
+            @click="emit('toggle-animation-playback')"
+          >
+            {{ isAnimationPlaying ? "暫停" : "播放" }}
+          </button>
+        </div>
+        <div class="animation-list">
+          <div
+            v-for="(animation, index) in stats.animations"
+            :key="`${animation.name}-${index}`"
+            class="animation-row"
+            :class="{ selected: selectedAnimationIndex === index }"
+          >
+            <button
+              class="animation-row__select"
+              type="button"
+              @click="emit('select-animation', index)"
+            >
+              <span>{{ animation.name }}</span>
+              <small>{{ animation.duration }}</small>
+            </button>
+            <button
+              class="animation-row__play"
+              type="button"
+              :class="{ playing: activeAnimationIndices.has(index) }"
+              :aria-label="
+                activeAnimationIndices.has(index) ? '暫停動畫' : '播放動畫'
+              "
+              @click="emit('play-animation', index)"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16">
+                <path
+                  v-if="activeAnimationIndices.has(index)"
+                  d="M5 3h2v10H5V3zm4 0h2v10H9V3z"
+                  fill="currentColor"
+                />
+                <path v-else d="M5 3.5v9l7-4.5-7-4.5z" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <AnimationDetailPanel
+          v-if="selectedAnimationDetail"
+          :detail="selectedAnimationDetail"
+          :applying-rotor-changes="applyingRotorAnimationChanges"
+          :removing="removingAnimation"
+          @update-settings="
+            (patch) =>
+              emit(
+                'update-animation-settings',
+                selectedAnimationDetail!.index,
+                patch,
+              )
+          "
+          @update-rotor-target="
+            (pivotUuid, patch) =>
+              emit(
+                'update-rotor-animation-target',
+                selectedAnimationDetail!.index,
+                pivotUuid,
+                patch,
+              )
+          "
+          @detect-rotor-target="
+            (pivotUuid, kind) =>
+              emit(
+                'detect-rotor-animation-target',
+                selectedAnimationDetail!.index,
+                pivotUuid,
+                kind,
+              )
+          "
+          @apply-rotor-changes="
+            emit(
+              'apply-rotor-animation-changes',
+              selectedAnimationDetail!.index,
+            )
+          "
+          @remove="emit('remove-animation', selectedAnimationDetail!.index)"
+        />
+      </section>
 
       <section v-if="selectedNodeDetails" class="panel">
         <div class="panel-heading">
@@ -547,94 +639,6 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
         @detect="(nodeId, kind) => emit('detect-rotor', nodeId, kind)"
         @apply="emit('apply-rotor-animation')"
       />
-
-      <section v-if="stats?.animations.length" class="panel">
-        <div class="panel-heading">
-          <span>動畫</span>
-          <button
-            class="compact-button"
-            type="button"
-            @click="emit('toggle-animation-playback')"
-          >
-            {{ isAnimationPlaying ? "暫停" : "播放" }}
-          </button>
-        </div>
-        <div class="animation-list">
-          <div
-            v-for="(animation, index) in stats.animations"
-            :key="`${animation.name}-${index}`"
-            class="animation-row"
-            :class="{ selected: selectedAnimationIndex === index }"
-          >
-            <button
-              class="animation-row__select"
-              type="button"
-              @click="emit('select-animation', index)"
-            >
-              <span>{{ animation.name }}</span>
-              <small>{{ animation.duration }}</small>
-            </button>
-            <button
-              class="animation-row__play"
-              type="button"
-              :class="{ playing: activeAnimationIndices.has(index) }"
-              :aria-label="
-                activeAnimationIndices.has(index) ? '暫停動畫' : '播放動畫'
-              "
-              @click="emit('play-animation', index)"
-            >
-              <svg aria-hidden="true" viewBox="0 0 16 16">
-                <path
-                  v-if="activeAnimationIndices.has(index)"
-                  d="M5 3h2v10H5V3zm4 0h2v10H9V3z"
-                  fill="currentColor"
-                />
-                <path v-else d="M5 3.5v9l7-4.5-7-4.5z" fill="currentColor" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <AnimationDetailPanel
-          v-if="selectedAnimationDetail"
-          :detail="selectedAnimationDetail"
-          :applying-rotor-changes="applyingRotorAnimationChanges"
-          :removing="removingAnimation"
-          @update-settings="
-            (patch) =>
-              emit(
-                'update-animation-settings',
-                selectedAnimationDetail!.index,
-                patch,
-              )
-          "
-          @update-rotor-target="
-            (pivotUuid, patch) =>
-              emit(
-                'update-rotor-animation-target',
-                selectedAnimationDetail!.index,
-                pivotUuid,
-                patch,
-              )
-          "
-          @detect-rotor-target="
-            (pivotUuid, kind) =>
-              emit(
-                'detect-rotor-animation-target',
-                selectedAnimationDetail!.index,
-                pivotUuid,
-                kind,
-              )
-          "
-          @apply-rotor-changes="
-            emit(
-              'apply-rotor-animation-changes',
-              selectedAnimationDetail!.index,
-            )
-          "
-          @remove="emit('remove-animation', selectedAnimationDetail!.index)"
-        />
-      </section>
 
       <section v-if="hasModel" class="panel">
         <div class="panel-heading">

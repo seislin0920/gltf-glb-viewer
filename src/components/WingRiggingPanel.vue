@@ -12,6 +12,8 @@ import type {
 const props = defineProps<{
   analysis: BirdModelAnalysis | null;
   meshOptions: Array<{ nodeId: string; nodeName: string }>;
+  unboundMeshOptions: Array<{ nodeId: string; nodeName: string }>;
+  boundMeshLabels: string[];
   workflowMode: WingWorkflowMode;
   landmarkSteps: WingLandmarkStep[];
   landmarkProgress: { filled: number; total: number };
@@ -69,6 +71,10 @@ const presetButtonLabel = computed(() => {
 
   return props.workflowMode === "node-pivot" ? "重新套用 Pivot" : "套用 Preset";
 });
+
+const rigButtonLabel = computed(() =>
+  props.rigReady ? "套用蒙皮到此 Mesh" : "建立骨骼與權重",
+);
 
 function updateOption<K extends keyof WingAnimationOptions>(
   key: K,
@@ -219,11 +225,19 @@ function stepStatusLabel(status: WingLandmarkStep["status"]) {
           <span>目標 Mesh</span>
           <select v-model="rigTargetNodeId" class="select-field">
             <option value="">請選擇</option>
-            <option v-for="option in meshOptions" :key="option.nodeId" :value="option.nodeId">
+            <option
+              v-for="option in unboundMeshOptions"
+              :key="option.nodeId"
+              :value="option.nodeId"
+            >
               {{ option.nodeName }}
             </option>
           </select>
         </label>
+
+        <p v-if="props.rigReady && boundMeshLabels.length" class="hint-text">
+          已套用蒙皮：{{ boundMeshLabels.join("、") }}
+        </p>
 
         <p v-if="activeLandmarkStep" class="landmark-hint">
           請在模型上點選：{{ activeLandmarkStep.label }}
@@ -259,7 +273,7 @@ function stepStatusLabel(status: WingLandmarkStep["status"]) {
         </div>
 
         <button class="export-button" type="button" :disabled="applyingRig" @click="emit('apply-rig')">
-          {{ applyingRig ? "套用中…" : "建立骨骼與權重" }}
+          {{ applyingRig ? "套用中…" : rigButtonLabel }}
         </button>
 
         <div v-if="rigReady" class="weight-section">
@@ -458,6 +472,10 @@ function stepStatusLabel(status: WingLandmarkStep["status"]) {
 
 .landmark-hint {
   @apply m-0 rounded-small border border-accent/30 bg-accent/10 px-2 py-1.5 text-xs font-bold text-text;
+}
+
+.hint-text {
+  @apply m-0 text-[11px] text-text-muted;
 }
 
 .landmark-steps {

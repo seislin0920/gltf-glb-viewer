@@ -4,6 +4,7 @@ import { buildBirdSkeleton } from "./buildBirdSkeleton";
 import { computeWingSkinWeights } from "./computeWingSkinWeights";
 import {
   bakeGeometryToMeshLocal,
+  bindSkinnedMesh,
   createSkinnedMeshFromGeometry,
 } from "./convertToSkinnedMesh";
 import { withDefaultWingWeightOptions } from "./resolveWingWeightScale";
@@ -23,23 +24,39 @@ function toLocalLandmarks(
   return local;
 }
 
-export function applyWingRigToMesh(
-  mesh: THREE.Mesh,
+export function createWingSkeleton(
   landmarks: WingLandmarks,
-  parent: THREE.Object3D,
+  armature: THREE.Object3D,
+) {
+  const { rootBone, skeleton, boneByName } = buildBirdSkeleton(
+    landmarks,
+    armature,
+  );
+  armature.add(rootBone);
+  return { rootBone, skeleton, boneByName };
+}
+
+export function bindMeshToWingSkeleton(
+  mesh: THREE.Mesh,
+  armature: THREE.Object3D,
+  skeleton: THREE.Skeleton,
+  localLandmarks: Record<string, THREE.Vector3>,
   options?: Partial<WingWeightOptions>,
 ) {
-  const { rootBone, skeleton, boneByName } = buildBirdSkeleton(landmarks, parent);
-  const localLandmarks = toLocalLandmarks(landmarks, parent);
-  const bakedGeometry = bakeGeometryToMeshLocal(mesh, parent);
+  const bakedGeometry = bakeGeometryToMeshLocal(mesh, armature);
 
   const boneIndexByName: Record<string, number> = {};
   skeleton.bones.forEach((bone, index) => {
     boneIndexByName[bone.name] = index;
   });
 
+  const position = bakedGeometry.getAttribute("position");
+  if (!(position instanceof THREE.BufferAttribute)) {
+    throw new Error("找不到可用的頂點座標資料。");
+  }
+
   const { skinIndex, skinWeight } = computeWingSkinWeights(
-    bakedGeometry.getAttribute("position"),
+    position,
     localLandmarks,
     boneIndexByName,
     withDefaultWingWeightOptions(options),
@@ -48,11 +65,40 @@ export function applyWingRigToMesh(
   const skinned = createSkinnedMeshFromGeometry(
     bakedGeometry,
     mesh,
-    skeleton,
-    rootBone,
     skinIndex,
     skinWeight,
   );
+  armature.add(skinned);
+  bindSkinnedMesh(skinned, skeleton);
 
-  return { skinned, skeleton, rootBone, boneByName, localLandmarks };
+  return { skinned, boneIndexByName };
+}
+
+export function applyWingRigToMesh(
+  mesh: THREE.Mesh,
+  landmarks: WingLandmarks,
+  armature: THREE.Object3D,
+  options?: Partial<WingWeightOptions>,
+) {
+  const { rootBone, skeleton, boneByName } = createWingSkeleton(
+    landmarks,
+    armature,
+  );
+  const localLandmarks = toLocalLandmarks(landmarks, armature);
+  const { skinned, boneIndexByName } = bindMeshToWingSkeleton(
+    mesh,
+    armature,
+    skeleton,
+    localLandmarks,
+    options,
+  );
+
+  return {
+    skinned,
+    skeleton,
+    rootBone,
+    boneByName,
+    boneIndexByName,
+    localLandmarks,
+  };
 }

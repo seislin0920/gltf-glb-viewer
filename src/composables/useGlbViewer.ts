@@ -63,8 +63,11 @@ import {
   validateRotorTarget,
 } from "../lib/addRotorAnimation";
 import { analyzeBirdModel } from "../lib/wing-rigging/analyzeBirdModel";
-import { applyWingRigToMesh } from "../lib/wing-rigging/applyWingRig";
-import { buildBirdSkeleton } from "../lib/wing-rigging/buildBirdSkeleton";
+import {
+  applyWingRigToMesh,
+  bindMeshToWingSkeleton,
+  createWingSkeleton,
+} from "../lib/wing-rigging/applyWingRig";
 import { computeWingSkinWeights } from "../lib/wing-rigging/computeWingSkinWeights";
 import { createFlapClipForPivot } from "../lib/wing-rigging/createFlapClipForPivot";
 import { presetToAnimationClip } from "../lib/wing-rigging/presetToClip";
@@ -74,6 +77,7 @@ import {
   removeWeightHeatmap,
 } from "../lib/wing-rigging/visualizeWingSkinWeights";
 import { buildWingWeightScaleHint } from "../lib/wing-rigging/resolveWingWeightScale";
+import { resolveArmatureContainer } from "../lib/wing-rigging/resolveArmatureContainer";
 import { wingFlapPresets } from "../lib/wing-rigging/wingFlapPresets";
 import {
   applyNodeColor as applyNodeColorToMeshes,
@@ -328,6 +332,27 @@ export function useGlbViewer() {
       .filter((item) => item.object && isMesh(item.object))
       .map(({ nodeId, nodeName }) => ({ nodeId, nodeName })),
   );
+  const wingUnboundMeshOptions = computed(() =>
+    sceneNodes.value
+      .map((node) => ({
+        nodeId: node.id,
+        nodeName: node.name,
+        object: objectByNodeId.get(node.id),
+      }))
+      .filter(({ object }) => {
+        if (!object || !isMesh(object)) {
+          return false;
+        }
+        if (object instanceof THREE.SkinnedMesh) {
+          return false;
+        }
+        return !wingRiggedMeshes.has(object.uuid);
+      })
+      .map(({ nodeId, nodeName }) => ({ nodeId, nodeName })),
+  );
+  const wingBoundMeshLabels = computed(() =>
+    Array.from(wingRiggedMeshes.values()).map((mesh) => mesh.name || mesh.uuid),
+  );
   const wingLandmarkProgress = computed(() => {
     const filled = Object.keys(wingLandmarks.value).length;
     return { filled, total: WING_LANDMARK_STEPS.length };
@@ -409,9 +434,12 @@ export function useGlbViewer() {
   let wingSkeletonHelper: THREE.SkeletonHelper | null = null;
   let wingPreviewRootBone: THREE.Bone | null = null;
   let wingBoneByName: Map<string, THREE.Bone> | null = null;
-  let wingRiggedMesh: THREE.SkinnedMesh | null = null;
+  let wingRiggedMeshes = new Map<string, THREE.SkinnedMesh>();
   let wingRigLocalLandmarks: Record<string, THREE.Vector3> | null = null;
   let wingBoneIndexByName: Record<string, number> | null = null;
+  let wingArmature: THREE.Object3D | null = null;
+  let wingSkeleton: THREE.Skeleton | null = null;
+  let wingArmatureOwned = false;
 
   const clock = new THREE.Clock();
   const raycaster = new THREE.Raycaster();
@@ -1878,14 +1906,16 @@ export function useGlbViewer() {
     }
     wingPreviewRootBone = null;
 
-    if (!wingRiggedMesh && scene && wingSkeletonHelper) {
+    if (wingRiggedMeshes.size === 0 && scene && wingSkeletonHelper) {
       scene.remove(wingSkeletonHelper);
       wingSkeletonHelper = null;
     }
   }
 
   function clearWingRigRuntimeState() {
-    disposeWeightHeatmap(wingRiggedMesh);
+    for (const rigged of wingRiggedMeshes.values()) {
+      disposeWeightHeatmap(rigged);
+    }
     if (wingPreviewRootBone?.parent) {
       wingPreviewRootBone.parent.remove(wingPreviewRootBone);
     }
@@ -1895,9 +1925,19 @@ export function useGlbViewer() {
       wingSkeletonHelper = null;
     }
     wingBoneByName = null;
-    wingRiggedMesh = null;
+    wingRiggedMeshes = new Map<string, THREE.SkinnedMesh>();
     wingRigLocalLandmarks = null;
     wingBoneIndexByName = null;
+    wingSkeleton = null;
+
+    if (wingArmatureOwned && wingArmature?.parent) {
+      const parent = wingArmature.parent;
+      const children = [...wingArmature.children];
+      children.forEach((child) => parent.attach(child));
+      parent.remove(wingArmature);
+    }
+    wingArmature = null;
+    wingArmatureOwned = false;
   }
 
   function getLandmarkMarkerRadius(active: boolean) {
@@ -1995,9 +2035,11 @@ export function useGlbViewer() {
     }
 
     const target = objectByNodeId.get(wingRigTargetNodeId.value);
-    const parent = target?.parent ?? modelRoot;
-    const { rootBone } = buildBirdSkeleton(landmarks, parent);
-    parent.add(rootBone);
+    if (!target || !isMesh(target)) {
+      return;
+    }
+    const { armature } = resolveArmatureContainer(target, modelRoot);
+    const { rootBone } = createWingSkeleton(landmarks, armature);
     wingPreviewRootBone = rootBone;
 
     wingSkeletonHelper = new THREE.SkeletonHelper(rootBone);
@@ -2199,6 +2241,17 @@ export function useGlbViewer() {
     return center.applyMatrix4(object.parent.matrixWorld.clone().invert());
   }
 
+  function resolveWingRiggedMesh(nodeId: string) {
+    const object = objectByNodeId.get(nodeId);
+    if (!object || !isMesh(object) || !(object instanceof THREE.SkinnedMesh)) {
+      if (wingRiggedMeshes.size > 0) {
+        return Array.from(wingRiggedMeshes.values()).at(-1) ?? null;
+      }
+      return null;
+    }
+    return wingRiggedMeshes.get(object.uuid) ?? null;
+  }
+
   function applyWingRig() {
     if (!modelRoot || applyingWingRig.value) {
       return;
@@ -2216,51 +2269,82 @@ export function useGlbViewer() {
       return;
     }
 
-    const landmarks = collectCompleteLandmarks();
-    if (!landmarks) {
-      errorMessage.value = "請先完成 6 點標記。";
-      return;
-    }
-
     applyingWingRig.value = true;
     errorMessage.value = "";
 
     try {
       clearWingSkeletonPreview();
-      const parent = target.parent ?? modelRoot;
-      const { skinned, boneByName, localLandmarks } = applyWingRigToMesh(
-        target,
-        landmarks,
-        parent,
-        wingWeightOptions.value,
-      );
+      if (!wingRigReady.value) {
+        const landmarks = collectCompleteLandmarks();
+        if (!landmarks) {
+          errorMessage.value = "請先完成 6 點標記。";
+          return;
+        }
 
-      parent.add(skinned);
-      parent.remove(target);
+        const { armature, owned } = resolveArmatureContainer(target, modelRoot);
+        const {
+          skinned,
+          boneByName,
+          localLandmarks,
+          boneIndexByName,
+          rootBone,
+          skeleton,
+        } = applyWingRigToMesh(target, landmarks, armature, wingWeightOptions.value);
 
-      const boneIndexByName: Record<string, number> = {};
-      skinned.skeleton.bones.forEach((bone, index) => {
-        boneIndexByName[bone.name] = index;
-      });
+        target.parent?.remove(target);
 
-      if (scene) {
-        wingSkeletonHelper = new THREE.SkeletonHelper(skinned);
-        wingSkeletonHelper.visible = true;
-        scene.add(wingSkeletonHelper);
+        if (scene) {
+          wingSkeletonHelper = new THREE.SkeletonHelper(rootBone);
+          wingSkeletonHelper.visible = true;
+          scene.add(wingSkeletonHelper);
+        }
+
+        wingArmature = armature;
+        wingArmatureOwned = owned;
+        wingSkeleton = skeleton;
+        wingBoneByName = boneByName;
+        wingRigLocalLandmarks = localLandmarks;
+        wingBoneIndexByName = boneIndexByName;
+        wingRiggedMeshes.set(skinned.uuid, skinned);
+        wingRigReady.value = true;
+        wingLandmarkModeEnabled.value = false;
+
+        if (wingWeightHeatmapEnabled.value) {
+          applyWeightHeatmap(skinned, boneIndexByName);
+        }
+
+        rebuildSceneTreePreservingSelection();
+        wingRigTargetNodeId.value = "";
+        return;
       }
 
-      wingBoneByName = boneByName;
-      wingRiggedMesh = skinned;
-      wingRigLocalLandmarks = localLandmarks;
+      if (!wingArmature || !wingSkeleton || !wingRigLocalLandmarks) {
+        errorMessage.value = "目前骨骼資料不完整，請重新套用 Rig。";
+        return;
+      }
+
+      if (target instanceof THREE.SkinnedMesh || wingRiggedMeshes.has(target.uuid)) {
+        errorMessage.value = "此 Mesh 已套用骨骼。";
+        return;
+      }
+
+      const { skinned, boneIndexByName } = bindMeshToWingSkeleton(
+        target,
+        wingArmature,
+        wingSkeleton,
+        wingRigLocalLandmarks,
+        wingWeightOptions.value,
+      );
+      target.parent?.remove(target);
+      wingRiggedMeshes.set(skinned.uuid, skinned);
       wingBoneIndexByName = boneIndexByName;
-      wingRigReady.value = true;
-      wingLandmarkModeEnabled.value = false;
 
       if (wingWeightHeatmapEnabled.value) {
         applyWeightHeatmap(skinned, boneIndexByName);
       }
 
       rebuildSceneTreePreservingSelection();
+      wingRigTargetNodeId.value = "";
     } catch (error) {
       errorMessage.value =
         error instanceof Error ? error.message : "套用翅膀 Rig 失敗。";
@@ -2320,11 +2404,12 @@ export function useGlbViewer() {
   }
 
   function recomputeWingSkinWeights() {
-    if (!wingRiggedMesh || !wingRigLocalLandmarks || !wingBoneIndexByName) {
+    const rigged = resolveWingRiggedMesh(wingRigTargetNodeId.value);
+    if (!rigged || !wingRigLocalLandmarks || !wingBoneIndexByName) {
       return;
     }
 
-    const geometry = wingRiggedMesh.geometry;
+    const geometry = rigged.geometry;
     const position = geometry.getAttribute("position") as THREE.BufferAttribute;
     if (!position) {
       return;
@@ -2341,10 +2426,10 @@ export function useGlbViewer() {
     geometry.setAttribute("skinWeight", skinWeight);
     skinIndex.needsUpdate = true;
     skinWeight.needsUpdate = true;
-    wingRiggedMesh.normalizeSkinWeights();
+    rigged.normalizeSkinWeights();
 
     if (wingWeightHeatmapEnabled.value) {
-      applyWeightHeatmap(wingRiggedMesh, wingBoneIndexByName);
+      applyWeightHeatmap(rigged, wingBoneIndexByName);
     }
   }
 
@@ -2358,16 +2443,17 @@ export function useGlbViewer() {
   function toggleWingWeightHeatmap(enabled: boolean) {
     wingWeightHeatmapEnabled.value = enabled;
 
-    if (!wingRiggedMesh || !wingBoneIndexByName) {
+    const rigged = resolveWingRiggedMesh(wingRigTargetNodeId.value);
+    if (!rigged || !wingBoneIndexByName) {
       return;
     }
 
     if (enabled) {
-      applyWeightHeatmap(wingRiggedMesh, wingBoneIndexByName);
+      applyWeightHeatmap(rigged, wingBoneIndexByName);
       return;
     }
 
-    removeWeightHeatmap(wingRiggedMesh);
+    removeWeightHeatmap(rigged);
   }
 
   function updateWingAnimationOptions(next: WingAnimationOptions) {
@@ -2906,6 +2992,8 @@ export function useGlbViewer() {
     revertingNodeColor,
     wingAnalysis,
     wingMeshOptions,
+    wingUnboundMeshOptions,
+    wingBoundMeshLabels,
     wingLandmarkProgress,
     wingLandmarkSteps,
     wingLandmarkModeEnabled,

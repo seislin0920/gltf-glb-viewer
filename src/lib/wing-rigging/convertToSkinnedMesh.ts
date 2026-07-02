@@ -21,8 +21,6 @@ export function bakeGeometryToMeshLocal(
 
 export function convertMeshToSkinned(
   mesh: THREE.Mesh,
-  skeleton: THREE.Skeleton,
-  rootBone: THREE.Bone,
   skinIndex: THREE.BufferAttribute,
   skinWeight: THREE.BufferAttribute,
 ): THREE.SkinnedMesh {
@@ -30,8 +28,6 @@ export function convertMeshToSkinned(
   return createSkinnedMeshFromGeometry(
     geometry,
     mesh,
-    skeleton,
-    rootBone,
     skinIndex,
     skinWeight,
   );
@@ -40,8 +36,6 @@ export function convertMeshToSkinned(
 export function createSkinnedMeshFromGeometry(
   geometry: THREE.BufferGeometry,
   sourceMesh: THREE.Mesh,
-  skeleton: THREE.Skeleton,
-  rootBone: THREE.Bone,
   skinIndex: THREE.BufferAttribute,
   skinWeight: THREE.BufferAttribute,
 ): THREE.SkinnedMesh {
@@ -53,13 +47,18 @@ export function createSkinnedMeshFromGeometry(
   skinned.castShadow = sourceMesh.castShadow;
   skinned.receiveShadow = sourceMesh.receiveShadow;
 
-  skinned.add(rootBone);
-  skinned.bind(skeleton);
-  skinned.normalizeSkinWeights();
-
   skinned.position.set(0, 0, 0);
   skinned.quaternion.identity();
   skinned.scale.set(1, 1, 1);
 
   return skinned;
+}
+
+export function bindSkinnedMesh(
+  skinned: THREE.SkinnedMesh,
+  skeleton: THREE.Skeleton,
+) {
+  skinned.updateMatrixWorld(true);
+  skinned.bind(skeleton);
+  skinned.normalizeSkinWeights();
 }

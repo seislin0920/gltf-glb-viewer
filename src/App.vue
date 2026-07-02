@@ -92,6 +92,8 @@ const {
   revertingNodeColor,
   wingAnalysis,
   wingMeshOptions,
+  wingUnboundMeshOptions,
+  wingBoundMeshLabels,
   wingLandmarkProgress,
   wingLandmarkSteps,
   wingLandmarkModeEnabled,
@@ -284,6 +286,8 @@ onMounted(async () => {
         :reverting-node-color="revertingNodeColor"
         :wing-analysis="wingAnalysis"
         :wing-mesh-options="wingMeshOptions"
+        :wing-unbound-mesh-options="wingUnboundMeshOptions"
+        :wing-bound-mesh-labels="wingBoundMeshLabels"
         :wing-landmark-progress="wingLandmarkProgress"
         :wing-landmark-steps="wingLandmarkSteps"
         :wing-landmark-mode-enabled="wingLandmarkModeEnabled"
