@@ -94,6 +94,9 @@ const {
   wingMeshOptions,
   wingUnboundMeshOptions,
   wingBoundMeshLabels,
+  wingBoneOptions,
+  wingBoneSlotNodeIds,
+  wingExistingSkeletonReady,
   wingLandmarkProgress,
   wingLandmarkSteps,
   wingLandmarkModeEnabled,
@@ -154,6 +157,7 @@ const {
   setWingLandmarkStep,
   clearWingLandmarks,
   setWingWorkflowMode,
+  updateWingBoneSlot,
   applyWingPivotAnimation,
   applyWingRig,
   applyWingPreset,
@@ -288,6 +292,9 @@ onMounted(async () => {
         :wing-mesh-options="wingMeshOptions"
         :wing-unbound-mesh-options="wingUnboundMeshOptions"
         :wing-bound-mesh-labels="wingBoundMeshLabels"
+        :wing-bone-options="wingBoneOptions"
+        :wing-bone-slot-node-ids="wingBoneSlotNodeIds"
+        :wing-existing-skeleton-ready="wingExistingSkeletonReady"
         :wing-landmark-progress="wingLandmarkProgress"
         :wing-landmark-steps="wingLandmarkSteps"
         :wing-landmark-mode-enabled="wingLandmarkModeEnabled"
@@ -329,6 +336,7 @@ onMounted(async () => {
         @select-wing-landmark-step="setWingLandmarkStep"
         @clear-wing-landmarks="clearWingLandmarks"
         @wing-workflow-mode-change="setWingWorkflowMode"
+        @update-wing-bone-slot="updateWingBoneSlot"
         @apply-wing-pivot="applyWingPivotAnimation"
         @apply-wing-rig="applyWingRig"
         @apply-wing-preset="applyWingPreset"

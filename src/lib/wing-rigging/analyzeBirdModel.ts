@@ -1,11 +1,22 @@
 import * as THREE from "three";
 import { isMesh } from "../modelUtils";
-import type { BirdModelAnalysis } from "../../types/wing-rigging";
+import type { BirdModelAnalysis, WingBoneSlotId } from "../../types/wing-rigging";
 
-const LEFT_HINTS = ["left", "_l", ".l", "l_", "-l", "wing_l", "lwing"];
-const RIGHT_HINTS = ["right", "_r", ".r", "r_", "-r", "wing_r", "rwing"];
-const WING_HINTS = ["wing", "flap", "feather"];
+const LEFT_HINTS = ["left", "_l", ".l", "l_", "-l", "wing_l", "lwing", "lleg", "_lleg"];
+const RIGHT_HINTS = ["right", "_r", ".r", "r_", "-r", "wing_r", "rwing", "rleg", "_rleg"];
+const WING_HINTS = ["wing", "flap", "feather", "leg", "platform", "hub"];
 const BODY_HINTS = ["body", "torso", "spine", "root"];
+
+const LEFT_BONE_SLOT_ORDER: WingBoneSlotId[] = [
+  "L_Wing_01_Shoulder",
+  "L_Wing_02_Mid",
+  "L_Wing_03_Tip",
+];
+const RIGHT_BONE_SLOT_ORDER: WingBoneSlotId[] = [
+  "R_Wing_01_Shoulder",
+  "R_Wing_02_Mid",
+  "R_Wing_03_Tip",
+];
 
 function includesAny(name: string, hints: string[]) {
   return hints.some((hint) => name.includes(hint));
@@ -21,16 +32,80 @@ function classifyWingSide(name: string) {
   return "unknown";
 }
 
+function scoreBoneCandidate(name: string, side: "left" | "right") {
+  const lower = name.toLowerCase();
+  let score = 0;
+
+  if (includesAny(lower, side === "left" ? LEFT_HINTS : RIGHT_HINTS)) {
+    score += 4;
+  }
+  if (includesAny(lower, WING_HINTS)) {
+    score += 2;
+  }
+  if (lower.includes("01") || lower.includes("1_") || lower.includes("_1")) {
+    score += 1;
+  }
+  if (lower.includes("02") || lower.includes("2_") || lower.includes("_2")) {
+    score += 0.5;
+  }
+  if (lower.includes("03") || lower.includes("3_") || lower.includes("_3")) {
+    score += 0.25;
+  }
+
+  return score;
+}
+
+function assignBoneCandidates(
+  bones: Array<{ uuid: string; name: string; side: "left" | "right" | "unknown" }>,
+) {
+  const leftBoneCandidates: Partial<Record<WingBoneSlotId, string>> = {};
+  const rightBoneCandidates: Partial<Record<WingBoneSlotId, string>> = {};
+
+  const leftBones = bones
+    .filter((bone) => bone.side === "left")
+    .sort(
+      (a, b) =>
+        scoreBoneCandidate(b.name, "left") - scoreBoneCandidate(a.name, "left"),
+    );
+  const rightBones = bones
+    .filter((bone) => bone.side === "right")
+    .sort(
+      (a, b) =>
+        scoreBoneCandidate(b.name, "right") - scoreBoneCandidate(a.name, "right"),
+    );
+
+  LEFT_BONE_SLOT_ORDER.forEach((slot, index) => {
+    const candidate = leftBones[index];
+    if (candidate) {
+      leftBoneCandidates[slot] = candidate.uuid;
+    }
+  });
+  RIGHT_BONE_SLOT_ORDER.forEach((slot, index) => {
+    const candidate = rightBones[index];
+    if (candidate) {
+      rightBoneCandidates[slot] = candidate.uuid;
+    }
+  });
+
+  return { leftBoneCandidates, rightBoneCandidates };
+}
+
 export function analyzeBirdModel(root: THREE.Object3D): BirdModelAnalysis {
   const warnings: string[] = [];
   const leftWingMeshCandidates: string[] = [];
   const rightWingMeshCandidates: string[] = [];
   const bodyMeshCandidates: string[] = [];
+  const boneRecords: Array<{
+    uuid: string;
+    name: string;
+    side: "left" | "right" | "unknown";
+  }> = [];
 
   let meshCount = 0;
   let hasSkinnedMesh = false;
   let hasExistingSkeleton = false;
-  let largestMesh: { uuid: string; size: number } | null = null;
+  let largestMeshUuid: string | null = null;
+  let largestMeshSize = -1;
 
   const box = new THREE.Box3();
   const size = new THREE.Vector3();
@@ -39,6 +114,12 @@ export function analyzeBirdModel(root: THREE.Object3D): BirdModelAnalysis {
   root.traverse((object) => {
     if (object instanceof THREE.Bone) {
       hasExistingSkeleton = true;
+      const name = object.name.toLowerCase();
+      boneRecords.push({
+        uuid: object.uuid,
+        name: object.name,
+        side: classifyWingSide(name),
+      });
     }
 
     if (!isMesh(object)) {
@@ -47,7 +128,7 @@ export function analyzeBirdModel(root: THREE.Object3D): BirdModelAnalysis {
 
     meshCount += 1;
 
-    if (object.isSkinnedMesh) {
+    if (object instanceof THREE.SkinnedMesh) {
       hasSkinnedMesh = true;
     }
 
@@ -56,8 +137,9 @@ export function analyzeBirdModel(root: THREE.Object3D): BirdModelAnalysis {
     box.getCenter(center);
 
     const meshSize = size.length();
-    if (!largestMesh || meshSize > largestMesh.size) {
-      largestMesh = { uuid: object.uuid, size: meshSize };
+    if (meshSize > largestMeshSize) {
+      largestMeshSize = meshSize;
+      largestMeshUuid = object.uuid;
     }
 
     const name = object.name.toLowerCase();
@@ -80,12 +162,23 @@ export function analyzeBirdModel(root: THREE.Object3D): BirdModelAnalysis {
     }
   });
 
+  const { leftBoneCandidates, rightBoneCandidates } =
+    assignBoneCandidates(boneRecords);
+
   if (meshCount === 0) {
     warnings.push("找不到任何 Mesh，請確認 GLB 是否含可渲染物件。");
   }
 
   if (hasSkinnedMesh) {
-    warnings.push("偵測到 SkinnedMesh，套用新骨骼可能覆寫既有骨架。");
+    warnings.push("偵測到 SkinnedMesh，可改用「既有骨骼」模式直接加拍翅動畫。");
+  }
+
+  if (
+    hasExistingSkeleton &&
+    (!leftBoneCandidates.L_Wing_01_Shoulder ||
+      !rightBoneCandidates.R_Wing_01_Shoulder)
+  ) {
+    warnings.push("無法自動辨識左右翅骨骼，請在「既有骨骼」模式手動指定。");
   }
 
   if (leftWingMeshCandidates.length === 0 || rightWingMeshCandidates.length === 0) {
@@ -96,13 +189,13 @@ export function analyzeBirdModel(root: THREE.Object3D): BirdModelAnalysis {
     warnings.push("Mesh 數量偏多，建議確認左右翅與身體是否拆分。");
   }
 
-  if (largestMesh && meshCount > 1 && bodyMeshCandidates.length === 0) {
-    bodyMeshCandidates.push(largestMesh.uuid);
+  if (largestMeshUuid && meshCount > 1 && bodyMeshCandidates.length === 0) {
+    bodyMeshCandidates.push(largestMeshUuid);
   }
 
   const suggestedMode: BirdModelAnalysis["suggestedMode"] =
     hasSkinnedMesh || hasExistingSkeleton
-      ? "manual"
+      ? "existing-skeleton"
       : leftWingMeshCandidates.length > 0 && rightWingMeshCandidates.length > 0
         ? "node-pivot"
         : "full-rig";
@@ -114,6 +207,8 @@ export function analyzeBirdModel(root: THREE.Object3D): BirdModelAnalysis {
     leftWingMeshCandidates,
     rightWingMeshCandidates,
     bodyMeshCandidates,
+    leftBoneCandidates,
+    rightBoneCandidates,
     suggestedMode,
     warnings,
   };

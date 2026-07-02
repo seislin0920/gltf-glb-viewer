@@ -3,17 +3,22 @@ import { computed } from "vue";
 import type {
   BirdModelAnalysis,
   WingAnimationOptions,
+  WingBoneSlotId,
   WingLandmarkStep,
   WingWeightOptions,
   WingWeightScaleHint,
   WingWorkflowMode,
 } from "../types/wing-rigging";
+import { WING_BONE_SLOT_OPTIONS } from "../types/wing-rigging";
 
 const props = defineProps<{
   analysis: BirdModelAnalysis | null;
   meshOptions: Array<{ nodeId: string; nodeName: string }>;
   unboundMeshOptions: Array<{ nodeId: string; nodeName: string }>;
   boundMeshLabels: string[];
+  boneOptions: Array<{ nodeId: string; nodeName: string }>;
+  boneSlotNodeIds: Partial<Record<WingBoneSlotId, string>>;
+  existingSkeletonReady: boolean;
   workflowMode: WingWorkflowMode;
   landmarkSteps: WingLandmarkStep[];
   landmarkProgress: { filled: number; total: number };
@@ -48,6 +53,7 @@ const emit = defineEmits<{
   "apply-rig": [];
   "apply-preset": [];
   "workflow-mode-change": [mode: WingWorkflowMode];
+  "update-bone-slot": [slot: WingBoneSlotId, nodeId: string];
   "update:animation-options": [value: WingAnimationOptions];
   "update:weight-options": [value: WingWeightOptions];
   "toggle-weight-heatmap": [enabled: boolean];
@@ -64,12 +70,19 @@ const presetButtonLabel = computed(() => {
   }
 
   if (!props.presetReady) {
-    return props.workflowMode === "node-pivot"
-      ? "請先套用 Pivot 拍翅"
-      : "請先完成 Rig";
+    if (props.workflowMode === "node-pivot") {
+      return "請先套用 Pivot 拍翅";
+    }
+    if (props.workflowMode === "existing-skeleton") {
+      return "請先指定骨骼";
+    }
+    return "請先完成 Rig";
   }
 
-  return props.workflowMode === "node-pivot" ? "重新套用 Pivot" : "套用 Preset";
+  if (props.workflowMode === "node-pivot") {
+    return "重新套用 Pivot";
+  }
+  return "套用 Preset";
 });
 
 const rigButtonLabel = computed(() =>
@@ -146,6 +159,27 @@ function formatScaleValue(value: number) {
   return value.toExponential(2);
 }
 
+function onBoneSlotSelect(slot: WingBoneSlotId, event: Event) {
+  const select = event.target as HTMLSelectElement | null;
+  if (!select) {
+    return;
+  }
+  emit("update-bone-slot", slot, select.value);
+}
+
+function suggestedModeLabel(mode: BirdModelAnalysis["suggestedMode"]) {
+  if (mode === "node-pivot") {
+    return "Pivot";
+  }
+  if (mode === "full-rig") {
+    return "完整 Rig";
+  }
+  if (mode === "existing-skeleton") {
+    return "既有骨骼";
+  }
+  return "手動";
+}
+
 function stepStatusLabel(status: WingLandmarkStep["status"]) {
   if (status === "done") {
     return "已完成";
@@ -162,7 +196,7 @@ function stepStatusLabel(status: WingLandmarkStep["status"]) {
     <div class="panel-heading">
       <span>翅膀 Rigging</span>
       <span v-if="analysis" class="status-pill">
-        建議：{{ analysis.suggestedMode === "node-pivot" ? "Pivot" : analysis.suggestedMode === "full-rig" ? "完整 Rig" : "手動" }}
+        建議：{{ suggestedModeLabel(analysis.suggestedMode) }}
       </span>
     </div>
 
@@ -171,7 +205,17 @@ function stepStatusLabel(status: WingLandmarkStep["status"]) {
         <p v-for="warning in analysis.warnings" :key="warning">⚠️ {{ warning }}</p>
       </div>
 
-      <div class="mode-toggle" role="radiogroup" aria-label="翅膀 Rigging 模式">
+      <div class="mode-toggle mode-toggle--three" role="radiogroup" aria-label="翅膀 Rigging 模式">
+        <label class="mode-option" :class="{ active: props.workflowMode === 'existing-skeleton' }">
+          <input
+            :checked="props.workflowMode === 'existing-skeleton'"
+            type="radio"
+            value="existing-skeleton"
+            class="sr-only"
+            @change="onWorkflowModeChange('existing-skeleton')"
+          />
+          既有骨骼
+        </label>
         <label class="mode-option" :class="{ active: props.workflowMode === 'node-pivot' }">
           <input
             :checked="props.workflowMode === 'node-pivot'"
@@ -194,7 +238,38 @@ function stepStatusLabel(status: WingLandmarkStep["status"]) {
         </label>
       </div>
 
-      <div v-if="props.workflowMode === 'node-pivot'" class="section">
+      <div v-if="props.workflowMode === 'existing-skeleton'" class="section">
+        <div class="section-title">既有骨骼拍翅</div>
+        <p class="hint-text">
+          將模型既有骨骼對應到拍翅 preset 的驅動骨，至少需指定左右翅根部。
+        </p>
+        <label
+          v-for="slot in WING_BONE_SLOT_OPTIONS"
+          :key="slot.id"
+          class="inline-field"
+        >
+          <span>{{ slot.label }}{{ slot.required ? " *" : "" }}</span>
+          <select
+            class="select-field"
+            :value="boneSlotNodeIds[slot.id] ?? ''"
+            @change="onBoneSlotSelect(slot.id, $event)"
+          >
+            <option value="">請選擇</option>
+            <option
+              v-for="option in boneOptions"
+              :key="option.nodeId"
+              :value="option.nodeId"
+            >
+              {{ option.nodeName }}
+            </option>
+          </select>
+        </label>
+        <p v-if="existingSkeletonReady" class="hint-text">
+          骨骼對應完成，可直接套用下方拍翅 Preset。
+        </p>
+      </div>
+
+      <div v-else-if="props.workflowMode === 'node-pivot'" class="section">
         <div class="section-title">Pivot 拍翅（獨立翅膀 Mesh）</div>
         <label class="inline-field">
           <span>左翅節點</span>
@@ -431,6 +506,10 @@ function stepStatusLabel(status: WingLandmarkStep["status"]) {
 
 .mode-toggle {
   @apply grid grid-cols-2 gap-1 rounded-default border border-line bg-surface p-1;
+}
+
+.mode-toggle--three {
+  @apply grid-cols-3;
 }
 
 .mode-option {

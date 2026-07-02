@@ -10,7 +10,7 @@ export type WingLandmarkId =
 
 export type WingLandmarks = Record<WingLandmarkId, THREE.Vector3>;
 
-export type WingWorkflowMode = "node-pivot" | "full-rig";
+export type WingWorkflowMode = "node-pivot" | "full-rig" | "existing-skeleton";
 
 export type WingLandmarkStepStatus = "pending" | "active" | "done";
 
@@ -58,6 +58,21 @@ export type BirdBoneName =
   | "R_Wing_02_Mid"
   | "R_Wing_03_Tip";
 
+export type WingBoneSlotId = Exclude<BirdBoneName, "BirdRoot">;
+
+export const WING_BONE_SLOT_OPTIONS: Array<{
+  id: WingBoneSlotId;
+  label: string;
+  required: boolean;
+}> = [
+  { id: "L_Wing_01_Shoulder", label: "左翅根部骨骼", required: true },
+  { id: "L_Wing_02_Mid", label: "左翅中段骨骼", required: false },
+  { id: "L_Wing_03_Tip", label: "左翅尖端骨骼", required: false },
+  { id: "R_Wing_01_Shoulder", label: "右翅根部骨骼", required: true },
+  { id: "R_Wing_02_Mid", label: "右翅中段骨骼", required: false },
+  { id: "R_Wing_03_Tip", label: "右翅尖端骨骼", required: false },
+];
+
 export interface BirdModelAnalysis {
   meshCount: number;
   hasSkinnedMesh: boolean;
@@ -65,7 +80,9 @@ export interface BirdModelAnalysis {
   leftWingMeshCandidates: string[];
   rightWingMeshCandidates: string[];
   bodyMeshCandidates: string[];
-  suggestedMode: "node-pivot" | "full-rig" | "manual";
+  leftBoneCandidates: Partial<Record<WingBoneSlotId, string>>;
+  rightBoneCandidates: Partial<Record<WingBoneSlotId, string>>;
+  suggestedMode: "node-pivot" | "full-rig" | "manual" | "existing-skeleton";
   warnings: string[];
 }
 

@@ -68,6 +68,10 @@ import {
   bindMeshToWingSkeleton,
   createWingSkeleton,
 } from "../lib/wing-rigging/applyWingRig";
+import {
+  buildWingBoneMapping,
+  isWingBoneMappingReady,
+} from "../lib/wing-rigging/buildWingBoneMapping";
 import { computeWingSkinWeights } from "../lib/wing-rigging/computeWingSkinWeights";
 import { createFlapClipForPivot } from "../lib/wing-rigging/createFlapClipForPivot";
 import { presetToAnimationClip } from "../lib/wing-rigging/presetToClip";
@@ -89,6 +93,7 @@ import {
 import type {
   BirdModelAnalysis,
   WingAnimationOptions,
+  WingBoneSlotId,
   WingLandmarkId,
   WingLandmarks,
   WingWeightOptions,
@@ -168,6 +173,7 @@ export function useGlbViewer() {
   const leftWingNodeId = ref("");
   const rightWingNodeId = ref("");
   const wingRigTargetNodeId = ref("");
+  const wingBoneSlotNodeIds = ref<Partial<Record<WingBoneSlotId, string>>>({});
   const wingPresetName = ref(wingFlapPresets[0]?.name ?? "slow_flap");
   const wingAnimationOptions = ref<WingAnimationOptions>({
     speedMultiplier: 1,
@@ -353,6 +359,19 @@ export function useGlbViewer() {
   const wingBoundMeshLabels = computed(() =>
     Array.from(wingRiggedMeshes.values()).map((mesh) => mesh.name || mesh.uuid),
   );
+  const wingBoneOptions = computed(() =>
+    sceneNodes.value
+      .map((node) => ({
+        nodeId: node.id,
+        nodeName: node.name,
+        object: objectByNodeId.get(node.id),
+      }))
+      .filter(({ object }) => object instanceof THREE.Bone)
+      .map(({ nodeId, nodeName }) => ({ nodeId, nodeName })),
+  );
+  const wingExistingSkeletonReady = computed(() =>
+    isWingBoneMappingReady(wingBoneSlotNodeIds.value),
+  );
   const wingLandmarkProgress = computed(() => {
     const filled = Object.keys(wingLandmarks.value).length;
     return { filled, total: WING_LANDMARK_STEPS.length };
@@ -381,11 +400,15 @@ export function useGlbViewer() {
       };
     });
   });
-  const wingPresetReady = computed(() =>
-    wingWorkflowMode.value === "node-pivot"
-      ? wingPivotReady.value
-      : wingRigReady.value,
-  );
+  const wingPresetReady = computed(() => {
+    if (wingWorkflowMode.value === "node-pivot") {
+      return wingPivotReady.value;
+    }
+    if (wingWorkflowMode.value === "existing-skeleton") {
+      return wingExistingSkeletonReady.value;
+    }
+    return wingRigReady.value;
+  });
   const wingWeightScaleHint = computed<WingWeightScaleHint | null>(() => {
     if (wingRigReady.value && wingRigLocalLandmarks) {
       return buildWingWeightScaleHint(
@@ -1038,6 +1061,7 @@ export function useGlbViewer() {
       leftWingNodeId.value = "";
       rightWingNodeId.value = "";
       wingRigTargetNodeId.value = "";
+      wingBoneSlotNodeIds.value = {};
       wingLandmarks.value = {};
       wingLandmarkIndex.value = 0;
       wingLandmarkModeEnabled.value = false;
@@ -1107,6 +1131,7 @@ export function useGlbViewer() {
     leftWingNodeId.value = "";
     rightWingNodeId.value = "";
     wingRigTargetNodeId.value = "";
+    wingBoneSlotNodeIds.value = {};
     wingLandmarks.value = {};
     wingLandmarkIndex.value = 0;
     wingLandmarkModeEnabled.value = false;
@@ -1896,8 +1921,28 @@ export function useGlbViewer() {
         analysis.leftWingMeshCandidates[0] ??
         analysis.rightWingMeshCandidates[0],
     );
+
+    const nextBoneSlots: Partial<Record<WingBoneSlotId, string>> = {};
+    for (const [slot, uuid] of Object.entries(analysis.leftBoneCandidates)) {
+      const nodeId = resolveNodeId(uuid);
+      if (nodeId) {
+        nextBoneSlots[slot as WingBoneSlotId] = nodeId;
+      }
+    }
+    for (const [slot, uuid] of Object.entries(analysis.rightBoneCandidates)) {
+      const nodeId = resolveNodeId(uuid);
+      if (nodeId) {
+        nextBoneSlots[slot as WingBoneSlotId] = nodeId;
+      }
+    }
+    wingBoneSlotNodeIds.value = nextBoneSlots;
+
     wingWorkflowMode.value =
-      analysis.suggestedMode === "node-pivot" ? "node-pivot" : "full-rig";
+      analysis.suggestedMode === "node-pivot"
+        ? "node-pivot"
+        : analysis.suggestedMode === "existing-skeleton"
+          ? "existing-skeleton"
+          : "full-rig";
   }
 
   function clearWingSkeletonPreview() {
@@ -2130,9 +2175,22 @@ export function useGlbViewer() {
       clearWingRigRuntimeState();
       wingRigReady.value = false;
       wingLandmarkModeEnabled.value = false;
+    } else if (mode === "full-rig") {
+      wingPivotReady.value = false;
     } else {
       wingPivotReady.value = false;
+      clearWingLandmarks();
+      clearWingRigRuntimeState();
+      wingRigReady.value = false;
+      wingLandmarkModeEnabled.value = false;
     }
+  }
+
+  function updateWingBoneSlot(slot: WingBoneSlotId, nodeId: string) {
+    wingBoneSlotNodeIds.value = {
+      ...wingBoneSlotNodeIds.value,
+      [slot]: nodeId,
+    };
   }
 
   function collectCompleteLandmarks(): WingLandmarks | null {
@@ -2364,6 +2422,58 @@ export function useGlbViewer() {
         return;
       }
       applyWingPivotAnimation();
+      return;
+    }
+
+    if (wingWorkflowMode.value === "existing-skeleton") {
+      if (!wingExistingSkeletonReady.value) {
+        errorMessage.value = "請先指定左右翅根部骨骼。";
+        return;
+      }
+
+      const preset = wingFlapPresets.find(
+        (item) => item.name === wingPresetName.value,
+      );
+      if (!preset) {
+        errorMessage.value = "找不到指定的拍翅 preset。";
+        return;
+      }
+
+      const boneMapping = buildWingBoneMapping(
+        wingBoneSlotNodeIds.value,
+        (nodeId) => objectByNodeId.get(nodeId),
+      );
+      if (boneMapping.size === 0) {
+        errorMessage.value = "找不到可用的骨骼對應。";
+        return;
+      }
+
+      applyingWingPreset.value = true;
+      errorMessage.value = "";
+
+      try {
+        const clip = presetToAnimationClip(preset, boneMapping, {
+          speedMultiplier: wingAnimationOptions.value.speedMultiplier,
+          amplitudeMultiplier: wingAnimationOptions.value.amplitudeMultiplier,
+          mirrorRight: wingAnimationOptions.value.mirrorRight,
+          loopMode: wingAnimationOptions.value.loopMode,
+        });
+
+        if (clip.tracks.length === 0) {
+          errorMessage.value = "沒有產生任何動畫軌道，請確認骨骼對應。";
+          return;
+        }
+
+        addAnimationClip(clip, {
+          ...createDefaultClipMeta("wing-rig"),
+          loopMode: wingAnimationOptions.value.loopMode,
+        });
+      } catch (error) {
+        errorMessage.value =
+          error instanceof Error ? error.message : "套用拍翅 preset 失敗。";
+      } finally {
+        applyingWingPreset.value = false;
+      }
       return;
     }
 
@@ -2994,6 +3104,9 @@ export function useGlbViewer() {
     wingMeshOptions,
     wingUnboundMeshOptions,
     wingBoundMeshLabels,
+    wingBoneOptions,
+    wingBoneSlotNodeIds,
+    wingExistingSkeletonReady,
     wingLandmarkProgress,
     wingLandmarkSteps,
     wingLandmarkModeEnabled,
@@ -3060,6 +3173,7 @@ export function useGlbViewer() {
     setWingLandmarkStep,
     clearWingLandmarks,
     setWingWorkflowMode,
+    updateWingBoneSlot,
     applyWingPivotAnimation,
     applyWingRig,
     applyWingPreset,

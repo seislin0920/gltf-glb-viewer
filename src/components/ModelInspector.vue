@@ -4,7 +4,7 @@ import AnimationDetailPanel from "./AnimationDetailPanel.vue";
 import RotorAnimationPanel from "./RotorAnimationPanel.vue";
 import NodeColorPanel from "./NodeColorPanel.vue";
 import WingRiggingPanel from "./WingRiggingPanel.vue";
-import type { BirdModelAnalysis, WingAnimationOptions, WingLandmarkStep, WingWeightOptions, WingWeightScaleHint, WingWorkflowMode } from "../types/wing-rigging";
+import type { BirdModelAnalysis, WingAnimationOptions, WingBoneSlotId, WingLandmarkStep, WingWeightOptions, WingWeightScaleHint, WingWorkflowMode } from "../types/wing-rigging";
 import type {
   AnimationLoopMode,
   ModelStats,
@@ -53,6 +53,9 @@ const props = defineProps<{
   wingMeshOptions: Array<{ nodeId: string; nodeName: string }>;
   wingUnboundMeshOptions: Array<{ nodeId: string; nodeName: string }>;
   wingBoundMeshLabels: string[];
+  wingBoneOptions: Array<{ nodeId: string; nodeName: string }>;
+  wingBoneSlotNodeIds: Partial<Record<WingBoneSlotId, string>>;
+  wingExistingSkeletonReady: boolean;
   wingLandmarkSteps: WingLandmarkStep[];
   wingLandmarkProgress: { filled: number; total: number };
   wingLandmarkModeEnabled: boolean;
@@ -142,6 +145,7 @@ const emit = defineEmits<{
   "select-wing-landmark-step": [index: number];
   "clear-wing-landmarks": [];
   "wing-workflow-mode-change": [mode: WingWorkflowMode];
+  "update-wing-bone-slot": [slot: WingBoneSlotId, nodeId: string];
   "apply-wing-pivot": [];
   "apply-wing-rig": [];
   "apply-wing-preset": [];
@@ -346,6 +350,9 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
         :mesh-options="wingMeshOptions"
         :unbound-mesh-options="wingUnboundMeshOptions"
         :bound-mesh-labels="wingBoundMeshLabels"
+        :bone-options="wingBoneOptions"
+        :bone-slot-node-ids="wingBoneSlotNodeIds"
+        :existing-skeleton-ready="wingExistingSkeletonReady"
         :workflow-mode="wingWorkflowMode"
         :landmark-steps="wingLandmarkSteps"
         :landmark-progress="wingLandmarkProgress"
@@ -369,6 +376,7 @@ function updateRotationAxis(axis: keyof Vector3Values, event: Event) {
         @select-landmark-step="(index) => emit('select-wing-landmark-step', index)"
         @clear-landmarks="emit('clear-wing-landmarks')"
         @workflow-mode-change="(mode) => emit('wing-workflow-mode-change', mode)"
+        @update-bone-slot="(slot, nodeId) => emit('update-wing-bone-slot', slot, nodeId)"
         @apply-pivot="emit('apply-wing-pivot')"
         @apply-rig="emit('apply-wing-rig')"
         @apply-preset="emit('apply-wing-preset')"
